@@ -43,7 +43,6 @@ import {
     Trash2,
     BadgeCheck,
     CalendarDays,
-    ImageUp,
     FileText,
     XCircle,
     CheckCircle2,
@@ -106,6 +105,7 @@ const ENDPOINTS = {
 
 const PRIMARY_BTN =
     'bg-[#00359c] text-white hover:bg-[#00359c]/90 focus-visible:ring-[#00359c]/30 dark:bg-[#00359c] dark:hover:bg-[#00359c]/90';
+const DEFAULT_EVENT_IMAGE = '/tumbnail.png';
 
 // -------------------- helpers --------------------
 function formatDatePill(starts_at?: string | null, ends_at?: string | null) {
@@ -171,7 +171,7 @@ function resolvePdfUrl(pdfUrl?: string | null) {
 }
 
 function resolveImageUrl(imageUrl?: string | null) {
-    if (!imageUrl) return null;
+    if (!imageUrl) return DEFAULT_EVENT_IMAGE;
     if (imageUrl.startsWith('http') || imageUrl.startsWith('/')) return imageUrl;
     return `/event-images/${imageUrl}`;
 }
@@ -356,7 +356,7 @@ export default function EventManagement(props: PageProps) {
         setCurrentImageUrl(null);
         setCurrentPdfUrl(null);
 
-        resetImagePreview(null);
+        resetImagePreview(DEFAULT_EVENT_IMAGE);
         setPdfLabel('');
         setMaterialsLabel('');
 
@@ -373,7 +373,7 @@ export default function EventManagement(props: PageProps) {
     function openEdit(item: ProgrammeRow) {
         setEditing(item);
 
-        setCurrentImageUrl(resolveImageUrl(item.image_url));
+        setCurrentImageUrl(item.image_url ? resolveImageUrl(item.image_url) : null);
         setCurrentPdfUrl(resolvePdfUrl(item.pdf_url));
 
         setExistingMaterials(item.materials ?? []);
@@ -625,10 +625,6 @@ export default function EventManagement(props: PageProps) {
                                                         <div className="grid size-10 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                                                             {(() => {
                                                                 const imageUrl = resolveImageUrl(p.image_url);
-                                                                if (!imageUrl) {
-                                                                    return <ImageUp className="h-4 w-4 text-slate-500" />;
-                                                                }
-
                                                                 return (
                                                                     <img
                                                                         src={imageUrl}
@@ -794,11 +790,7 @@ export default function EventManagement(props: PageProps) {
 
                                             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                                                 <div className="aspect-square bg-slate-100 dark:bg-slate-900">
-                                                    {imagePreview ? (
-                                                        <img src={imagePreview} alt="Preview" className="h-full w-full object-cover" draggable={false} />
-                                                    ) : (
-                                                        <div className="grid h-full place-items-center text-xs text-slate-500">No image</div>
-                                                    )}
+                                                    <img src={imagePreview ?? DEFAULT_EVENT_IMAGE} alt="Preview" className="h-full w-full object-cover" draggable={false} />
                                                 </div>
                                             </div>
                                         </div>

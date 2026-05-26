@@ -92,7 +92,6 @@ class ProgrammeController extends Controller
     public function publicIndex()
     {
         $programmes = Programme::query()
-            ->where('is_active', true)
             ->latest('starts_at')
             ->get()
             ->map(fn (Programme $programme) => [

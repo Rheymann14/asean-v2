@@ -56,9 +56,10 @@ const breadcrumbs = [
     { title: 'Dashboard', href: '/participant-dashboard' },
     { title: 'Event List', href: '/event-list' },
 ];
+const DEFAULT_EVENT_IMAGE = '/tumbnail.png';
 
 function resolveImageUrl(imageUrl?: string | null) {
-    if (!imageUrl) return null;
+    if (!imageUrl) return DEFAULT_EVENT_IMAGE;
     if (imageUrl.startsWith('http') || imageUrl.startsWith('/')) return imageUrl;
     return `/event-images/${imageUrl}`;
 }

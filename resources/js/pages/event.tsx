@@ -44,12 +44,15 @@ type PageProps = {
     programmes?: ProgrammeRow[];
 };
 
+const DEFAULT_EVENT_IMAGE = '/tumbnail.png';
+
 type FlexHoverItem = {
     id: number;
     title: string;
     body: string;
     image: string | null;
     tint: string;
+    isActive: boolean;
 
     startsAt: string;
     endsAt?: string;
@@ -64,7 +67,7 @@ const TINTS = [
 ];
 
 function resolveImageUrl(imageUrl?: string | null) {
-    if (!imageUrl) return null; // ✅ no image -> null
+    if (!imageUrl) return DEFAULT_EVENT_IMAGE;
     if (imageUrl.startsWith('http') || imageUrl.startsWith('/'))
         return imageUrl;
     return `/event-images/${imageUrl}`;
@@ -756,7 +759,9 @@ function ProgrammeGroups({
                 ...it,
                 _startTs: new Date(it.startsAt).getTime(),
                 _endOrStartTs: new Date(it.endsAt ?? it.startsAt).getTime(),
-                _phase: getEventPhase(it.startsAt, it.endsAt, nowTs),
+                _phase: it.isActive
+                    ? getEventPhase(it.startsAt, it.endsAt, nowTs)
+                    : 'closed',
             }))
             .sort((a, b) => a._startTs - b._startTs);
     }, [filteredItems, nowTs]);
@@ -870,6 +875,7 @@ export default function Programme({ programmes = [] }: PageProps) {
                 body: programme.description,
                 image: resolveImageUrl(programme.image_url),
                 tint: TINTS[index % TINTS.length],
+                isActive: programme.is_active,
                 startsAt,
                 endsAt: programme.ends_at ?? undefined,
                 cta: pdfUrl ? { label: 'View more', href: pdfUrl } : undefined,

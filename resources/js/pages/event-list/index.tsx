@@ -9,7 +9,7 @@ import { cn, toDateOnlyTimestamp } from '@/lib/utils';
 import { CalendarDays, MapPin, Users2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const FALLBACK_IMAGE = '/img/asean_banner_logo.png';
+const FALLBACK_IMAGE = '/tumbnail.png';
 
 type ProgrammeRow = {
     id: number;
