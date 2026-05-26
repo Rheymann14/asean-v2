@@ -138,6 +138,7 @@ class DashboardController extends Controller
                     'id' => $programme->id,
                     'title' => $programme->title,
                     'starts_at' => $programme->starts_at?->toISOString(),
+                    'ends_at' => $programme->ends_at?->toISOString(),
                     'attendance_count' => $records->count(),
                     'joined_count' => $joinedTotal,
                     'joined_by_country' => $joinedByCountry,
@@ -213,11 +214,40 @@ class DashboardController extends Controller
             ->get()
             ->map(fn (Feedback $feedback) => [
                 'id' => $feedback->id,
+                'programme_id' => $feedback->programme_id,
                 'user_experience_rating' => $feedback->user_experience_rating,
                 'event_ratings' => $feedback->event_ratings,
                 'recommendations' => $feedback->recommendations,
                 'created_at' => $feedback->created_at?->toISOString(),
             ]);
+
+        $feedbackByEvent = Feedback::query()
+            ->selectRaw('programme_id, COUNT(*) as total, AVG(user_experience_rating) as avg_rating')
+            ->whereNotNull('programme_id')
+            ->groupBy('programme_id')
+            ->get()
+            ->mapWithKeys(fn ($row) => [
+                (string) $row->programme_id => [
+                    'total' => (int) $row->total,
+                    'avg_rating' => $row->avg_rating !== null ? round((float) $row->avg_rating, 1) : null,
+                ],
+            ])
+            ->all();
+
+        $feedbackEntriesByEvent = Feedback::query()
+            ->whereNotNull('programme_id')
+            ->latest()
+            ->get()
+            ->groupBy('programme_id')
+            ->map(fn ($entries) => $entries->take(5)->map(fn (Feedback $feedback) => [
+                'id' => $feedback->id,
+                'programme_id' => $feedback->programme_id,
+                'user_experience_rating' => $feedback->user_experience_rating,
+                'event_ratings' => $feedback->event_ratings,
+                'recommendations' => $feedback->recommendations,
+                'created_at' => $feedback->created_at?->toISOString(),
+            ])->values())
+            ->all();
 
         return Inertia::render('dashboard', [
             'countries' => $countries,
@@ -233,6 +263,8 @@ class DashboardController extends Controller
                 'total' => (int) ($feedbackStats->total ?? 0),
                 'avg_rating' => $feedbackStats?->avg_rating !== null ? round((float) $feedbackStats->avg_rating, 1) : null,
                 'entries' => $feedbackEntries,
+                'by_event' => $feedbackByEvent,
+                'entries_by_event' => $feedbackEntriesByEvent,
             ],
         ]);
     }

@@ -15,6 +15,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 import {
     Command,
@@ -43,6 +44,7 @@ import {
     PieChart,
     ResponsiveContainer,
     Tooltip,
+    type TooltipContentProps,
     XAxis,
     YAxis,
 } from 'recharts';
@@ -85,6 +87,7 @@ type DashboardEvent = {
     id: number;
     title: string;
     starts_at: string | null;
+    ends_at: string | null;
     attendance_count: number;
     joined_count: number;
     joined_by_country: Record<string, number>;
@@ -100,6 +103,7 @@ type LineDatum = {
 
 type FeedbackEntry = {
     id: number;
+    programme_id: number | null;
     user_experience_rating: number | null;
     event_ratings: Record<string, number> | null;
     recommendations: string | null;
@@ -120,6 +124,14 @@ type PageProps = {
         total: number;
         avg_rating: number | null;
         entries: FeedbackEntry[];
+        by_event: Record<
+            string,
+            {
+                total: number;
+                avg_rating: number | null;
+            }
+        >;
+        entries_by_event: Record<string, FeedbackEntry[]>;
     };
 };
 
@@ -147,6 +159,36 @@ function getFlagSrc(country?: CountryOption | null) {
     if (country.flag_url) return country.flag_url;
     const code = (country.code || '').toLowerCase().trim();
     return code ? `/asean/${code}.png` : null;
+}
+
+type EventStatus = 'ongoing' | 'upcoming' | 'closed';
+
+function getEventStatus(event: DashboardEvent): EventStatus {
+    const now = new Date();
+    const startsAt = event.starts_at ? new Date(event.starts_at) : null;
+    const endsAt = event.ends_at ? new Date(event.ends_at) : null;
+
+    if (startsAt && startsAt > now) return 'upcoming';
+    if (endsAt && endsAt < now) return 'closed';
+    if (!endsAt && startsAt && startsAt < now) return 'closed';
+
+    return 'ongoing';
+}
+
+function getEventStatusClassName(status: EventStatus) {
+    if (status === 'ongoing') {
+        return 'border-emerald-200/70 bg-emerald-50/80 text-emerald-700 hover:bg-emerald-100/80 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200';
+    }
+
+    if (status === 'upcoming') {
+        return 'border-sky-200/70 bg-sky-50/80 text-sky-700 hover:bg-sky-100/80 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200';
+    }
+
+    return 'border-slate-200/80 bg-slate-50/80 text-slate-600 hover:bg-slate-100/80 dark:border-slate-500/30 dark:bg-slate-500/10 dark:text-slate-300';
+}
+
+function getEventStatusLabel(status: EventStatus) {
+    return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 function KpiCard({
@@ -231,8 +273,11 @@ function StarRating({ value, max = 5 }: { value: number; max?: number }) {
 
 export default function Dashboard() {
     const { props } = usePage<PageProps>();
+    const isMobile = useIsMobile();
     const [open, setOpen] = React.useState(false);
+    const [eventOpen, setEventOpen] = React.useState(false);
     const [country, setCountry] = React.useState<string | null>(null);
+    const [eventFilter, setEventFilter] = React.useState<string | null>(null);
     const [attendanceOpen, setAttendanceOpen] = React.useState(false);
     const [selectedEvent, setSelectedEvent] = React.useState<
         (DashboardEvent & { participants: EventParticipant[] }) | null
@@ -245,7 +290,7 @@ export default function Dashboard() {
         countries,
         stats,
         events,
-        country_stats: countryStats,
+        country_stats: baseCountryStats,
         line_data: lineData,
         feedback,
     } = props;
@@ -258,6 +303,10 @@ export default function Dashboard() {
     const current = countryId
         ? (countries.find((c) => c.id === countryId) ?? null)
         : null;
+    const eventFilterId = eventFilter ? Number(eventFilter) : null;
+    const eventFilterEvent = eventFilterId
+        ? (events.find((event) => event.id === eventFilterId) ?? null)
+        : null;
 
     // ✅ Subtle chart colors (no gradients)
     const CHART_PRIMARY = '#60a5fa'; // soft blue
@@ -265,19 +314,66 @@ export default function Dashboard() {
     const PIE_SCANNED = '#86efac'; // soft green
     const PIE_NOT = '#fda4af'; // soft rose
 
+    const filteredCountryStats = React.useMemo(() => {
+        if (!eventFilterEvent) return baseCountryStats;
+
+        const scansByCountry = eventFilterEvent.participants.reduce<
+            Record<string, number>
+        >((counts, participant) => {
+            if (participant.country_id === null) return counts;
+
+            const key = String(participant.country_id);
+            counts[key] = (counts[key] ?? 0) + 1;
+
+            return counts;
+        }, {});
+
+        const nextStats: Record<
+            string,
+            { participants: number; scans: number }
+        > = {};
+
+        Object.entries(eventFilterEvent.joined_by_country ?? {}).forEach(
+            ([countryKey, participantCount]) => {
+                nextStats[countryKey] = {
+                    participants: Number(participantCount ?? 0),
+                    scans: scansByCountry[countryKey] ?? 0,
+                };
+            },
+        );
+
+        Object.entries(scansByCountry).forEach(([countryKey, scanCount]) => {
+            if (!nextStats[countryKey]) {
+                nextStats[countryKey] = {
+                    participants: 0,
+                    scans: scanCount,
+                };
+            }
+        });
+
+        return nextStats;
+    }, [baseCountryStats, eventFilterEvent]);
+
     const filteredParticipants = countryId
-        ? (countryStats?.[String(countryId)]?.participants ?? 0)
-        : stats.participants_total;
+        ? (filteredCountryStats?.[String(countryId)]?.participants ?? 0)
+        : eventFilterEvent
+          ? eventFilterEvent.joined_count
+          : stats.participants_total;
     const filteredScans = countryId
-        ? (countryStats?.[String(countryId)]?.scans ?? 0)
-        : stats.scans_total;
+        ? (filteredCountryStats?.[String(countryId)]?.scans ?? 0)
+        : eventFilterEvent
+          ? eventFilterEvent.attendance_count
+          : stats.scans_total;
+    const filteredEventsTotal = eventFilterEvent ? 1 : stats.events_total;
 
     const attendanceByEvent = React.useMemo(() => {
-        return events.map((event) => {
+        const scopedEvents = eventFilterEvent ? [eventFilterEvent] : events;
+
+        return scopedEvents.map((event) => {
             const filtered = countryId
                 ? event.participants.filter(
-                    (participant) => participant.country_id === countryId,
-                )
+                      (participant) => participant.country_id === countryId,
+                  )
                 : event.participants;
 
             return {
@@ -291,7 +387,7 @@ export default function Dashboard() {
                     : event.joined_count,
             };
         });
-    }, [events, countryId]);
+    }, [events, countryId, eventFilterEvent]);
 
     const topEventsRows = React.useMemo(() => {
         return attendanceByEvent
@@ -342,6 +438,14 @@ export default function Dashboard() {
         return Array.from({ length: steps + 1 }, (_, i) => i * joinedTickStep);
     }, [joinedXAxisMax, joinedTickStep]);
 
+    const joinedYAxisWidth = isMobile ? 82 : 128;
+    const joinedNameLimit = isMobile ? 10 : 18;
+    const joinedChartMargin = isMobile
+        ? { top: 10, right: 28, left: 0, bottom: 10 }
+        : { top: 10, right: 36, left: 4, bottom: 10 };
+    const tooltipClassName =
+        'max-w-[min(16rem,calc(100vw-3rem))] whitespace-normal break-words rounded-xl border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur';
+
     const joinedChartHeight = React.useMemo(() => {
         const rows = Math.max(1, joinedByEvent.length);
 
@@ -358,13 +462,54 @@ export default function Dashboard() {
     }, [joinedByEvent.length]);
 
     const chartLineData = React.useMemo(() => {
+        if (eventFilterEvent) {
+            const scansByMonth = Array.from({ length: 12 }, () => 0);
+
+            eventFilterEvent.participants.forEach((participant) => {
+                if (countryId && participant.country_id !== countryId) {
+                    return;
+                }
+
+                if (!participant.scanned_at) return;
+
+                const scannedAt = new Date(participant.scanned_at);
+                const monthIndex = scannedAt.getMonth();
+
+                if (monthIndex >= 0 && monthIndex < 12) {
+                    scansByMonth[monthIndex] += 1;
+                }
+            });
+
+            return scansByMonth.map((scans, index) => ({
+                day: new Intl.DateTimeFormat('en-PH', {
+                    month: 'short',
+                }).format(new Date(new Date().getFullYear(), index, 1)),
+                scans,
+            }));
+        }
+
         return lineData.map((item) => ({
             day: item.label,
             scans: countryId
                 ? (item.scans_by_country[String(countryId)] ?? 0)
                 : item.scans,
         }));
-    }, [lineData, countryId]);
+    }, [lineData, countryId, eventFilterEvent]);
+
+    const filteredFeedback = React.useMemo(() => {
+        if (!eventFilterId) return feedback;
+
+        const key = String(eventFilterId);
+        const eventFeedback = feedback.by_event?.[key];
+
+        return {
+            total: eventFeedback?.total ?? 0,
+            avg_rating: eventFeedback?.avg_rating ?? null,
+            entries: feedback.entries_by_event?.[key] ?? [],
+            by_event: feedback.by_event,
+            entries_by_event: feedback.entries_by_event,
+        };
+    }, [feedback, eventFilterId]);
 
     const donut = React.useMemo(() => {
         const scanned = Math.max(0, filteredScans);
@@ -384,11 +529,12 @@ export default function Dashboard() {
         };
     }, [filteredParticipants, filteredScans]);
 
-    const currentBadge = current ? (
-        <Badge variant="secondary" className="rounded-full">
-            Filtered
-        </Badge>
-    ) : null;
+    const currentBadge =
+        current || eventFilterEvent ? (
+            <Badge variant="secondary" className="rounded-full">
+                Filtered
+            </Badge>
+        ) : null;
 
     const selectedParticipants = selectedEvent?.participants ?? [];
     const selectedEventDate = selectedEvent?.starts_at
@@ -406,7 +552,7 @@ export default function Dashboard() {
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Dashboard" />
 
-            <div className="flex h-full flex-1 flex-col gap-3 overflow-x-auto rounded-xl p-3">
+            <div className="flex h-full min-w-0 flex-1 flex-col gap-3 overflow-x-hidden rounded-xl p-3">
                 {/* Header (compact) */}
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div className="space-y-0.5">
@@ -456,11 +602,128 @@ export default function Dashboard() {
                     </div>
 
                     {/* Country filter */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                         <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
                             <Filter className="size-4" />
                             Filter:
                         </div>
+
+                        <Popover open={eventOpen} onOpenChange={setEventOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    className="h-9 max-w-[260px] justify-between rounded-xl px-3 text-xs"
+                                >
+                                    <span className="flex min-w-0 items-center gap-2">
+                                        <span className="min-w-0 truncate">
+                                            {eventFilterEvent
+                                                ? eventFilterEvent.title
+                                                : 'All events'}
+                                        </span>
+                                        {eventFilterEvent ? (
+                                            <Badge
+                                                variant="secondary"
+                                                className={cn(
+                                                    'shrink-0 rounded-full border text-[11px]',
+                                                    getEventStatusClassName(
+                                                        getEventStatus(
+                                                            eventFilterEvent,
+                                                        ),
+                                                    ),
+                                                )}
+                                            >
+                                                {getEventStatusLabel(
+                                                    getEventStatus(
+                                                        eventFilterEvent,
+                                                    ),
+                                                )}
+                                            </Badge>
+                                        ) : null}
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-60" />
+                                </Button>
+                            </PopoverTrigger>
+
+                            <PopoverContent
+                                className="w-[340px] p-0"
+                                align="end"
+                            >
+                                <Command>
+                                    <CommandInput placeholder="Search event..." />
+                                    <CommandEmpty>
+                                        No events found.
+                                    </CommandEmpty>
+
+                                    <CommandList className="max-h-[320px] overflow-auto overscroll-contain">
+                                        <CommandGroup>
+                                            <CommandItem
+                                                value="__all_events__"
+                                                onSelect={() => {
+                                                    setEventFilter(null);
+                                                    setEventOpen(false);
+                                                }}
+                                                className="gap-2"
+                                            >
+                                                <span className="inline-flex size-4 items-center justify-center">
+                                                    {!eventFilter ? (
+                                                        <Check className="size-4" />
+                                                    ) : null}
+                                                </span>
+                                                <span className="truncate">
+                                                    All events
+                                                </span>
+                                            </CommandItem>
+                                        </CommandGroup>
+
+                                        <CommandGroup heading="Events">
+                                            {events.map((event) => {
+                                                const status =
+                                                    getEventStatus(event);
+
+                                                return (
+                                                    <CommandItem
+                                                        key={event.id}
+                                                        value={`${event.title} ${status} ${event.id}`}
+                                                        onSelect={() => {
+                                                            setEventFilter(
+                                                                String(
+                                                                    event.id,
+                                                                ),
+                                                            );
+                                                            setEventOpen(false);
+                                                        }}
+                                                        className="gap-2"
+                                                    >
+                                                        <span className="inline-flex size-4 items-center justify-center">
+                                                            {eventFilter ===
+                                                            String(event.id) ? (
+                                                                <Check className="size-4" />
+                                                            ) : null}
+                                                        </span>
+                                                        <span className="min-w-0 flex-1 truncate">
+                                                            {event.title}
+                                                        </span>
+                                                        <Badge
+                                                            variant="secondary"
+                                                            className={cn(
+                                                                'shrink-0 rounded-full border text-[11px]',
+                                                                getEventStatusClassName(
+                                                                    status,
+                                                                ),
+                                                            )}
+                                                        >
+                                                            {getEventStatusLabel(
+                                                                status,
+                                                            )}
+                                                        </Badge>
+                                                    </CommandItem>
+                                                );
+                                            })}
+                                        </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
 
                         <Popover open={open} onOpenChange={setOpen}>
                             <PopoverTrigger asChild>
@@ -516,7 +779,9 @@ export default function Dashboard() {
                                                 className="gap-2"
                                             >
                                                 <span className="inline-flex size-4 items-center justify-center">
-                                                    {!country ? <Check className="size-4" /> : null}
+                                                    {!country ? (
+                                                        <Check className="size-4" />
+                                                    ) : null}
                                                 </span>
                                                 <span>All countries</span>
                                             </CommandItem>
@@ -525,31 +790,42 @@ export default function Dashboard() {
                                         <CommandGroup heading="ASEAN Countries">
                                             {groupedCountries.asean.map((c) => {
                                                 const participantCount =
-                                                    countryStats?.[String(c.id)]?.participants ?? 0;
+                                                    filteredCountryStats?.[
+                                                        String(c.id)
+                                                    ]?.participants ?? 0;
 
                                                 return (
                                                     <CommandItem
                                                         key={c.id}
                                                         value={String(c.id)}
                                                         onSelect={() => {
-                                                            setCountry(String(c.id));
+                                                            setCountry(
+                                                                String(c.id),
+                                                            );
                                                             setOpen(false);
                                                         }}
                                                         className="gap-2"
                                                     >
                                                         <span className="inline-flex size-4 items-center justify-center">
-                                                            {country === String(c.id) ? (
+                                                            {country ===
+                                                            String(c.id) ? (
                                                                 <Check className="size-4" />
                                                             ) : null}
                                                         </span>
                                                         {getFlagSrc(c) ? (
                                                             <img
-                                                                src={getFlagSrc(c) ?? ''}
+                                                                src={
+                                                                    getFlagSrc(
+                                                                        c,
+                                                                    ) ?? ''
+                                                                }
                                                                 alt=""
                                                                 className="size-5 rounded-full object-cover"
                                                             />
                                                         ) : null}
-                                                        <span className="truncate">{c.name}</span>
+                                                        <span className="truncate">
+                                                            {c.name}
+                                                        </span>
                                                         <Badge
                                                             variant="secondary"
                                                             className="ml-auto rounded-full text-[11px]"
@@ -561,49 +837,74 @@ export default function Dashboard() {
                                             })}
                                         </CommandGroup>
 
-                                        {groupedCountries.nonAsean.length > 0 ? (
+                                        {groupedCountries.nonAsean.length >
+                                        0 ? (
                                             <CommandGroup heading="Non-ASEAN Countries">
-                                                {groupedCountries.nonAsean.map((c) => {
-                                                    const participantCount =
-                                                        countryStats?.[String(c.id)]?.participants ?? 0;
+                                                {groupedCountries.nonAsean.map(
+                                                    (c) => {
+                                                        const participantCount =
+                                                            filteredCountryStats?.[
+                                                                String(c.id)
+                                                            ]?.participants ??
+                                                            0;
 
-                                                    return (
-                                                        <CommandItem
-                                                            key={c.id}
-                                                            value={String(c.id)}
-                                                            onSelect={() => {
-                                                                setCountry(String(c.id));
-                                                                setOpen(false);
-                                                            }}
-                                                            className="gap-2"
-                                                        >
-                                                            <span className="inline-flex size-4 items-center justify-center">
-                                                                {country === String(c.id) ? (
-                                                                    <Check className="size-4" />
-                                                                ) : null}
-                                                            </span>
-                                                            {getFlagSrc(c) ? (
-                                                                <img
-                                                                    src={getFlagSrc(c) ?? ''}
-                                                                    alt=""
-                                                                    className="size-5 rounded-full object-cover"
-                                                                />
-                                                            ) : null}
-                                                            <span className="truncate">{c.name}</span>
-                                                            <Badge
-                                                                variant="secondary"
-                                                                className="ml-auto rounded-full text-[11px]"
+                                                        return (
+                                                            <CommandItem
+                                                                key={c.id}
+                                                                value={String(
+                                                                    c.id,
+                                                                )}
+                                                                onSelect={() => {
+                                                                    setCountry(
+                                                                        String(
+                                                                            c.id,
+                                                                        ),
+                                                                    );
+                                                                    setOpen(
+                                                                        false,
+                                                                    );
+                                                                }}
+                                                                className="gap-2"
                                                             >
-                                                                {participantCount.toLocaleString()}
-                                                            </Badge>
-                                                        </CommandItem>
-                                                    );
-                                                })}
+                                                                <span className="inline-flex size-4 items-center justify-center">
+                                                                    {country ===
+                                                                    String(
+                                                                        c.id,
+                                                                    ) ? (
+                                                                        <Check className="size-4" />
+                                                                    ) : null}
+                                                                </span>
+                                                                {getFlagSrc(
+                                                                    c,
+                                                                ) ? (
+                                                                    <img
+                                                                        src={
+                                                                            getFlagSrc(
+                                                                                c,
+                                                                            ) ??
+                                                                            ''
+                                                                        }
+                                                                        alt=""
+                                                                        className="size-5 rounded-full object-cover"
+                                                                    />
+                                                                ) : null}
+                                                                <span className="truncate">
+                                                                    {c.name}
+                                                                </span>
+                                                                <Badge
+                                                                    variant="secondary"
+                                                                    className="ml-auto rounded-full text-[11px]"
+                                                                >
+                                                                    {participantCount.toLocaleString()}
+                                                                </Badge>
+                                                            </CommandItem>
+                                                        );
+                                                    },
+                                                )}
                                             </CommandGroup>
                                         ) : null}
                                     </CommandList>
                                 </Command>
-
                             </PopoverContent>
                         </Popover>
                     </div>
@@ -629,9 +930,13 @@ export default function Dashboard() {
 
                     <KpiCard
                         title="Events"
-                        value={stats.events_total.toLocaleString()}
+                        value={filteredEventsTotal.toLocaleString()}
                         icon={CalendarFold}
-                        hint="Total events in the programme"
+                        hint={
+                            eventFilterEvent
+                                ? 'Selected event'
+                                : 'Total events in the programme'
+                        }
                         tint="bg-gradient-to-br from-emerald-500/12 via-transparent to-cyan-500/10"
                     />
 
@@ -655,9 +960,9 @@ export default function Dashboard() {
                 </div>
 
                 {/* Charts */}
-                <div className="grid gap-3 lg:grid-cols-3">
+                <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,1fr)]">
                     {/* Scan Trend (Area) - no gradient */}
-                    <Card className="rounded-2xl border border-sidebar-border/70 dark:border-sidebar-border">
+                    <Card className="min-w-0 rounded-2xl border border-sidebar-border/70 dark:border-sidebar-border">
                         <CardHeader className="p-4 pb-2">
                             <div className="flex items-center justify-between">
                                 <div className="space-y-0.5">
@@ -710,11 +1015,16 @@ export default function Dashboard() {
                                             active,
                                             payload,
                                             label,
-                                        }: any) => {
+                                        }: TooltipContentProps<
+                                            number,
+                                            string
+                                        >) => {
                                             if (!active || !payload?.length)
                                                 return null;
                                             return (
-                                                <div className="rounded-xl border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+                                                <div
+                                                    className={tooltipClassName}
+                                                >
                                                     <div className="font-medium text-foreground">
                                                         {String(label ?? '')}
                                                     </div>
@@ -723,7 +1033,7 @@ export default function Dashboard() {
                                                             {Number(
                                                                 payload[0]
                                                                     ?.value ??
-                                                                0,
+                                                                    0,
                                                             ).toLocaleString()}
                                                         </span>{' '}
                                                         scans
@@ -752,7 +1062,7 @@ export default function Dashboard() {
                         </CardContent>
                     </Card>
 
-                    <Card className="rounded-2xl border border-sidebar-border/70 dark:border-sidebar-border">
+                    <Card className="min-w-0 rounded-2xl border border-sidebar-border/70 md:col-span-2 xl:col-span-1 dark:border-sidebar-border">
                         <CardHeader className="p-4 pb-2">
                             <div className="space-y-0.5">
                                 <CardTitle className="text-sm">
@@ -765,7 +1075,7 @@ export default function Dashboard() {
                         </CardHeader>
 
                         <CardContent className="p-4 pt-2">
-                            <div className="max-h-[280px] overflow-auto pr-1">
+                            <div className="max-h-[280px] overflow-x-hidden overflow-y-auto pr-1">
                                 <div
                                     style={{ height: joinedChartHeight }}
                                     className="min-h-[210px]"
@@ -777,12 +1087,7 @@ export default function Dashboard() {
                                         <BarChart
                                             data={joinedByEvent}
                                             layout="vertical"
-                                            margin={{
-                                                top: 10,
-                                                right: 10,
-                                                left: 10,
-                                                bottom: 10,
-                                            }}
+                                            margin={joinedChartMargin}
                                         >
                                             <CartesianGrid
                                                 strokeDasharray="3 3"
@@ -803,29 +1108,50 @@ export default function Dashboard() {
                                                 type="category"
                                                 tickLine={false}
                                                 axisLine={false}
-                                                width={140}
+                                                width={joinedYAxisWidth}
                                                 className="text-[11px]"
                                                 tickFormatter={(
                                                     value: string,
                                                 ) =>
-                                                    value.length > 18
-                                                        ? `${value.slice(0, 18)}…`
+                                                    value.length >
+                                                    joinedNameLimit
+                                                        ? `${value.slice(0, joinedNameLimit)}…`
                                                         : value
                                                 }
                                             />
                                             <Tooltip
+                                                allowEscapeViewBox={{
+                                                    x: false,
+                                                    y: false,
+                                                }}
+                                                offset={8}
+                                                position={{
+                                                    x: joinedYAxisWidth + 12,
+                                                    y: 8,
+                                                }}
+                                                wrapperStyle={{
+                                                    zIndex: 20,
+                                                    pointerEvents: 'none',
+                                                }}
                                                 content={({
                                                     active,
                                                     payload,
                                                     label,
-                                                }: any) => {
+                                                }: TooltipContentProps<
+                                                    number,
+                                                    string
+                                                >) => {
                                                     if (
                                                         !active ||
                                                         !payload?.length
                                                     )
                                                         return null;
                                                     return (
-                                                        <div className="rounded-xl border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+                                                        <div
+                                                            className={
+                                                                tooltipClassName
+                                                            }
+                                                        >
                                                             <div className="font-medium text-foreground">
                                                                 {String(
                                                                     label ?? '',
@@ -836,7 +1162,7 @@ export default function Dashboard() {
                                                                     {Number(
                                                                         payload[0]
                                                                             ?.value ??
-                                                                        0,
+                                                                            0,
                                                                     ).toLocaleString()}
                                                                 </span>{' '}
                                                                 joined
@@ -865,7 +1191,7 @@ export default function Dashboard() {
                     </Card>
 
                     {/* Donut (subtle solid colors) */}
-                    <Card className="relative overflow-hidden rounded-2xl border border-sidebar-border/70 dark:border-sidebar-border">
+                    <Card className="relative min-w-0 overflow-hidden rounded-2xl border border-sidebar-border/70 dark:border-sidebar-border">
                         <CardHeader className="relative p-4 pb-2">
                             <CardTitle className="text-sm">Scan Rate</CardTitle>
                             <div className="text-xs text-muted-foreground">
@@ -888,12 +1214,24 @@ export default function Dashboard() {
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                     <Tooltip
-                                        content={({ active, payload }: any) => {
+                                        wrapperStyle={{
+                                            zIndex: 20,
+                                            pointerEvents: 'none',
+                                        }}
+                                        content={({
+                                            active,
+                                            payload,
+                                        }: TooltipContentProps<
+                                            number,
+                                            string
+                                        >) => {
                                             if (!active || !payload?.length)
                                                 return null;
                                             const item = payload[0];
                                             return (
-                                                <div className="rounded-xl border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+                                                <div
+                                                    className={tooltipClassName}
+                                                >
                                                     <div className="font-medium text-foreground">
                                                         {String(
                                                             item?.name ?? '',
@@ -903,7 +1241,7 @@ export default function Dashboard() {
                                                         <span className="font-semibold text-foreground">
                                                             {Number(
                                                                 item?.value ??
-                                                                0,
+                                                                    0,
                                                             ).toLocaleString()}
                                                         </span>
                                                     </div>
@@ -1008,7 +1346,7 @@ export default function Dashboard() {
                                                         Math.round(
                                                             (ev.attendance /
                                                                 maxScanned) *
-                                                            100,
+                                                                100,
                                                         ),
                                                     ),
                                                 );
@@ -1122,7 +1460,8 @@ export default function Dashboard() {
                                     variant="secondary"
                                     className="rounded-full border border-amber-200/70 bg-amber-50/70 text-[11px] text-amber-800 hover:bg-amber-100/70 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/15"
                                 >
-                                    {feedback.total.toLocaleString()} total
+                                    {filteredFeedback.total.toLocaleString()}{' '}
+                                    total
                                 </Badge>
                             </div>
                         </CardHeader>
@@ -1133,22 +1472,22 @@ export default function Dashboard() {
                                     Average rating
                                 </span>
                                 <div className="flex items-center gap-2">
-                                    {feedback.avg_rating !== null ? (
+                                    {filteredFeedback.avg_rating !== null ? (
                                         <StarRating
-                                            value={feedback.avg_rating}
+                                            value={filteredFeedback.avg_rating}
                                         />
                                     ) : null}
                                     <span className="font-semibold text-foreground">
-                                        {feedback.avg_rating !== null
-                                            ? `${feedback.avg_rating}/5`
+                                        {filteredFeedback.avg_rating !== null
+                                            ? `${filteredFeedback.avg_rating}/5`
                                             : '—'}
                                     </span>
                                 </div>
                             </div>
 
                             <div className="mt-3 max-h-[220px] space-y-3 overflow-auto pr-1">
-                                {feedback.entries.length ? (
-                                    feedback.entries.map((entry) => {
+                                {filteredFeedback.entries.length ? (
+                                    filteredFeedback.entries.map((entry) => {
                                         const eventRatings = Object.entries(
                                             entry.event_ratings ?? {},
                                         ).filter(([, value]) => value > 0);
@@ -1174,14 +1513,14 @@ export default function Dashboard() {
                                                     <span className="text-[11px] text-muted-foreground">
                                                         {entry.created_at
                                                             ? formatShortDate(
-                                                                entry.created_at,
-                                                            )
+                                                                  entry.created_at,
+                                                              )
                                                             : '—'}
                                                     </span>
                                                 </div>
                                                 <div className="mt-2 flex flex-wrap gap-2">
                                                     {entry.user_experience_rating !==
-                                                        null ? (
+                                                    null ? (
                                                         <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-foreground">
                                                             UX
                                                             <StarRating
