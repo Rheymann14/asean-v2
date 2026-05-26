@@ -46,6 +46,9 @@ import {
     FileText,
     XCircle,
     CheckCircle2,
+    MapPin,
+    ExternalLink,
+    ChevronDown,
 } from 'lucide-react';
 
 type ProgrammeParticipant = {
@@ -68,8 +71,12 @@ type ProgrammeRow = {
     ends_at: string | null; // ISO string
     location?: string | null;
     venue?: {
+        id: number;
         name: string;
         address?: string | null;
+        google_maps_url?: string | null;
+        embed_url?: string | null;
+        is_active?: boolean;
     } | null;
 
     image_url: string | null; // server-provided
@@ -100,6 +107,10 @@ const ENDPOINTS = {
         store: '/programmes',
         update: (id: number) => `/programmes/${id}`,
         destroy: (id: number) => `/programmes/${id}`,
+    },
+    venues: {
+        store: '/venues',
+        update: (id: number) => `/venues/${id}`,
     },
 };
 
@@ -255,6 +266,73 @@ function EmptyState({
     );
 }
 
+function VenueMapPreview({
+    embedUrl,
+    googleMapsUrl,
+}: {
+    embedUrl?: string | null;
+    googleMapsUrl?: string | null;
+}) {
+    if (!embedUrl) {
+        return (
+            <div className="grid h-[320px] place-items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-center dark:border-slate-800 dark:bg-slate-900/30">
+                <div className="grid place-items-center gap-2 px-6">
+                    <MapPin className="h-7 w-7 text-slate-500" />
+                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">No map embed yet</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-400">Enter a venue name or address to preview the map here.</div>
+
+                    {googleMapsUrl ? (
+                        <Button asChild variant="secondary" className="mt-2 rounded-full">
+                            <a href={googleMapsUrl} target="_blank" rel="noreferrer">
+                                <ExternalLink className="mr-2 h-4 w-4" />
+                                Open in Google Maps
+                            </a>
+                        </Button>
+                    ) : null}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+            <iframe
+                title="Venue map preview"
+                src={embedUrl}
+                className="h-[320px] w-full pointer-events-none"
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+            />
+            <div
+                aria-hidden
+                className="pointer-events-none absolute left-3 top-3 h-16 w-52 rounded-lg bg-white/90 shadow-sm dark:bg-slate-900/90"
+            />
+            <div
+                aria-hidden
+                className="pointer-events-none absolute right-3 top-3 h-12 w-12 rounded-lg bg-white/90 shadow-sm dark:bg-slate-900/90"
+            />
+        </div>
+    );
+}
+
+function extractIframeSrc(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (!trimmed.includes('<iframe')) return trimmed;
+    const match = trimmed.match(/src=["']([^"']+)["']/i);
+    return match?.[1] ?? trimmed;
+}
+
+function resolveVenueEmbedUrl(name: string, address: string, embedUrl: string) {
+    const explicitEmbed = extractIframeSrc(embedUrl);
+    if (explicitEmbed) return explicitEmbed;
+
+    const query = [name, address].filter(Boolean).join(', ').trim();
+    if (!query) return '';
+
+    return `https://maps.google.com/maps?output=embed&z=16&q=${encodeURIComponent(query)}`;
+}
+
 export default function EventManagement(props: PageProps) {
     const serverProgrammes: ProgrammeRow[] = props.programmes ?? [];
 
@@ -264,12 +342,14 @@ export default function EventManagement(props: PageProps) {
     const [q, setQ] = React.useState('');
     const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'inactive'>('all');
     const [eventFilter, setEventFilter] = React.useState<'all' | 'upcoming' | 'ongoing' | 'closed'>('all');
+    const [expandedRows, setExpandedRows] = React.useState<Set<number>>(new Set());
 
     const filtered = React.useMemo(() => {
         const query = q.trim().toLowerCase();
         return programmes.filter((p) => {
             const createdBy = p.created_by?.name ?? '';
-            const matchesQuery = !query || `${p.title} ${p.description} ${createdBy}`.toLowerCase().includes(query);
+            const venueText = `${p.venue?.name ?? ''} ${p.venue?.address ?? ''}`;
+            const matchesQuery = !query || `${p.title} ${p.description} ${createdBy} ${venueText}`.toLowerCase().includes(query);
             const matchesStatus = statusFilter === 'all' || (statusFilter === 'active' ? p.is_active : !p.is_active);
             const phase = getEventStatus(p.starts_at, p.ends_at);
             const matchesEvent = eventFilter === 'all' || phase === eventFilter;
@@ -340,6 +420,27 @@ export default function EventManagement(props: PageProps) {
         materials: [],
         is_active: true,
     });
+
+    const [venueTarget, setVenueTarget] = React.useState<ProgrammeRow | null>(null);
+
+    const venueForm = useForm<{
+        name: string;
+        address: string;
+        google_maps_url: string;
+        embed_url: string;
+        is_active: boolean;
+    }>({
+        name: '',
+        address: '',
+        google_maps_url: '',
+        embed_url: '',
+        is_active: true,
+    });
+
+    const venueEmbedPreviewUrl = React.useMemo(
+        () => resolveVenueEmbedUrl(venueForm.data.name, venueForm.data.address, venueForm.data.embed_url),
+        [venueForm.data.name, venueForm.data.address, venueForm.data.embed_url],
+    );
 
     function resetImagePreview(next: string | null) {
         setImagePreview((prev) => {
@@ -525,6 +626,172 @@ export default function EventManagement(props: PageProps) {
         router.get(`/event-management/${item.id}/participants`);
     }
 
+    function openVenueDialog(item: ProgrammeRow) {
+        setVenueTarget(item);
+        venueForm.setData({
+            name: item.venue?.name ?? '',
+            address: item.venue?.address ?? '',
+            google_maps_url: item.venue?.google_maps_url ?? '',
+            embed_url: item.venue?.embed_url ?? '',
+            is_active: item.venue?.is_active ?? true,
+        });
+        venueForm.clearErrors();
+    }
+
+    function closeVenueDialog() {
+        if (venueForm.processing) return;
+
+        setVenueTarget(null);
+        venueForm.reset();
+        venueForm.clearErrors();
+    }
+
+    function submitVenue(e: React.FormEvent) {
+        e.preventDefault();
+
+        if (!venueTarget) return;
+
+        venueForm.transform((data) => ({
+            programme_id: venueTarget.id,
+            name: data.name.trim(),
+            address: data.address.trim(),
+            google_maps_url: data.google_maps_url.trim() || null,
+            embed_url: resolveVenueEmbedUrl(data.name.trim(), data.address.trim(), data.embed_url) || null,
+            is_active: !!data.is_active,
+        }));
+
+        const options = {
+            preserveScroll: true,
+            onSuccess: () => {
+                setVenueTarget(null);
+                venueForm.reset();
+                venueForm.clearErrors();
+                toast.success('Venue saved.');
+            },
+            onError: (errors: Record<string, string | string[]>) => showToastError(errors),
+        } as const;
+
+        if (venueTarget.venue?.id) {
+            venueForm.patch(ENDPOINTS.venues.update(venueTarget.venue.id), options);
+        } else {
+            venueForm.post(ENDPOINTS.venues.store, options);
+        }
+    }
+
+    function toggleExpanded(id: number) {
+        setExpandedRows((current) => {
+            const next = new Set(current);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }
+
+    function renderPdfLink(item: ProgrammeRow, compact = false) {
+        const pdfUrl = resolvePdfUrl(item.pdf_url);
+        if (!pdfUrl) {
+            return <span className="text-xs text-slate-500 dark:text-slate-400">No PDF uploaded</span>;
+        }
+
+        return (
+            <a
+                href={pdfUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={cn(
+                    'inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-[#00359c] hover:text-[#00359c] dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200',
+                    compact ? 'w-full justify-center sm:w-auto' : '',
+                )}
+            >
+                <FileText className="h-4 w-4 shrink-0 text-[#00359c]" />
+                <span className="truncate">{basename(pdfUrl)}</span>
+            </a>
+        );
+    }
+
+    function renderVenueSummary(item: ProgrammeRow, compact = false) {
+        if (!item.venue) {
+            return <span className="text-xs text-slate-500 dark:text-slate-400">No venue yet</span>;
+        }
+
+        return (
+            <div className="space-y-1">
+                <div className="flex min-w-0 items-center gap-2 font-medium text-slate-900 dark:text-slate-100">
+                    <MapPin className="h-4 w-4 shrink-0 text-slate-500" />
+                    <span className="truncate">{item.venue.name}</span>
+                </div>
+                {item.venue.address ? (
+                    <div className={cn('text-xs text-slate-500 dark:text-slate-400', compact ? '' : 'line-clamp-2')}>{item.venue.address}</div>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                    {item.venue.google_maps_url ? (
+                        <a
+                            href={item.venue.google_maps_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 font-medium text-[#00359c] hover:underline"
+                        >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Google Maps
+                        </a>
+                    ) : null}
+                    {item.venue.is_active === false ? (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-900">Inactive</span>
+                    ) : null}
+                </div>
+            </div>
+        );
+    }
+
+    function renderParticipantsButton(item: ProgrammeRow, fullWidth = false) {
+        return (
+            <button
+                type="button"
+                onClick={() => openParticipants(item)}
+                className={cn(
+                    'inline-flex items-center justify-center gap-2 rounded-full border border-[#00359c]/20 bg-[#00359c]/5 px-3 py-1 text-sm font-semibold text-[#00359c] shadow-sm hover:bg-[#00359c]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00359c]/30',
+                    fullWidth ? 'w-full' : '',
+                )}
+            >
+                {(item.participants?.length ?? 0).toLocaleString()} joined
+                <span className="text-xs font-medium opacity-70">View</span>
+            </button>
+        );
+    }
+
+    function renderActionMenu(item: ProgrammeRow) {
+        return (
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="rounded-full">
+                        <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                    <DropdownMenuItem onSelect={() => openEdit(item)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openVenueDialog(item)}>
+                        <MapPin className="mr-2 h-4 w-4" />
+                        Add venue
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => toggleActive(item)}>
+                        <BadgeCheck className="mr-2 h-4 w-4" />
+                        {item.is_active ? 'Set Inactive' : 'Set Active'}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-red-600 focus:text-red-600" onSelect={() => requestDelete(item)}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+        );
+    }
+
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Event Management" />
@@ -601,26 +868,164 @@ export default function EventManagement(props: PageProps) {
                             />
                         ) : (
                             // ✅ scrollbar only in table area
-                            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
-                                <Table className="min-w-[1480px]">
+                            <>
+                            <div className="space-y-3 xl:hidden">
+                                {filtered.map((p) => (
+                                    <div key={p.id} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+                                        <div className="flex items-start gap-3">
+                                            <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                                                <img
+                                                    src={resolveImageUrl(p.image_url)}
+                                                    alt={p.title}
+                                                    className="h-full w-full object-cover"
+                                                    loading="lazy"
+                                                    draggable={false}
+                                                />
+                                            </div>
+
+                                            <div className="min-w-0 flex-1">
+                                                <div className="line-clamp-2 font-semibold text-slate-900 dark:text-slate-100">{p.title}</div>
+                                                <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{formatDatePill(p.starts_at, p.ends_at)}</div>
+                                                <div className="text-xs text-slate-500 dark:text-slate-400">{daysToGo(p.starts_at) ?? '—'}</div>
+                                            </div>
+
+                                            {renderActionMenu(p)}
+                                        </div>
+
+                                        <div className="mt-3 grid gap-3">
+                                            {renderVenueSummary(p, true)}
+
+                                            <div className="flex flex-wrap gap-2">
+                                                <EventStatusBadge status={getEventStatus(p.starts_at, p.ends_at)} />
+                                                <StatusBadge active={p.is_active} />
+                                            </div>
+
+                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                {renderParticipantsButton(p, true)}
+                                                {renderPdfLink(p, true)}
+                                            </div>
+
+                                            <div className="text-xs text-slate-500 dark:text-slate-400">Updated {formatDateTimeSafe(p.updated_at)}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="hidden overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 xl:block">
+                                <div className="grid grid-cols-[minmax(300px,1fr)_220px_150px_125px_170px_72px] items-center gap-4 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 dark:bg-slate-900/40 dark:text-slate-100">
+                                    <div>Event</div>
+                                    <div>Schedule</div>
+                                    <div>Event Status</div>
+                                    <div>Status</div>
+                                    <div>Participants</div>
+                                    <div className="text-right">Action</div>
+                                </div>
+
+                                <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                                    {filtered.map((p) => {
+                                        const expanded = expandedRows.has(p.id);
+
+                                        return (
+                                            <div key={p.id} className="bg-white dark:bg-slate-950">
+                                                <div className="grid grid-cols-[minmax(300px,1fr)_220px_150px_125px_170px_72px] items-center gap-4 px-4 py-3">
+                                                    <div className="flex min-w-0 items-center gap-3">
+                                                        <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                                                            <img
+                                                                src={resolveImageUrl(p.image_url)}
+                                                                alt={p.title}
+                                                                className="h-full w-full object-cover"
+                                                                loading="lazy"
+                                                                draggable={false}
+                                                            />
+                                                        </div>
+
+                                                        <div className="min-w-0">
+                                                            <div className="line-clamp-2 font-semibold leading-snug text-slate-900 dark:text-slate-100">{p.title}</div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => toggleExpanded(p.id)}
+                                                                className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[#00359c] hover:underline"
+                                                            >
+                                                                <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expanded ? 'rotate-180' : '')} />
+                                                                {expanded ? 'Hide details' : 'Show details'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="min-w-0 text-sm text-slate-700 dark:text-slate-300">
+                                                        <div className="font-medium leading-snug">{formatDatePill(p.starts_at, p.ends_at)}</div>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400">{daysToGo(p.starts_at) ?? '—'}</div>
+                                                    </div>
+
+                                                    <div>
+                                                        <EventStatusBadge status={getEventStatus(p.starts_at, p.ends_at)} />
+                                                    </div>
+
+                                                    <div>
+                                                        <StatusBadge active={p.is_active} />
+                                                    </div>
+
+                                                    <div>{renderParticipantsButton(p)}</div>
+
+                                                    <div className="text-right">{renderActionMenu(p)}</div>
+                                                </div>
+
+                                                {expanded ? (
+                                                    <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-5 dark:border-slate-800 dark:bg-slate-900/30">
+                                                        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,0.75fr)_minmax(0,0.8fr)]">
+                                                            <div className="min-w-0">
+                                                                <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Description</div>
+                                                                <div className="mt-2 break-words text-sm leading-6 text-slate-700 dark:text-slate-300">{p.description}</div>
+                                                            </div>
+
+                                                            <div className="min-w-0">
+                                                                <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Venue</div>
+                                                                <div className="mt-2 break-words text-sm text-slate-700 dark:text-slate-300">{renderVenueSummary(p, true)}</div>
+                                                            </div>
+
+                                                            <div className="min-w-0">
+                                                                <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">View More</div>
+                                                                <div className="mt-2">{renderPdfLink(p)}</div>
+                                                            </div>
+
+                                                            <div>
+                                                                <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Updated</div>
+                                                                <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">{formatDateTimeSafe(p.updated_at)}</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            <div className="hidden">
+                                <Table className="w-full table-fixed">
                                     <TableHeader>
                                         <TableRow className="bg-slate-50 dark:bg-slate-900/40">
-                                            <TableHead className="min-w-[360px]">Event</TableHead>
+                                            <TableHead>Event</TableHead>
 
-                                            <TableHead className="min-w-[260px]">Schedule</TableHead>
-                                            <TableHead className="min-w-[220px]">View more (PDF)</TableHead>
-                                            <TableHead className="w-[160px]">Event Status</TableHead>
-                                            <TableHead className="w-[140px]">Status</TableHead>
-                                            <TableHead className="w-[200px]">Participants</TableHead>
-                                            <TableHead className="w-[180px]">Updated</TableHead>
-                                            <TableHead className="w-[120px] text-right">Action</TableHead>
+                                            <TableHead className="w-[220px]">Schedule</TableHead>
+                                            <TableHead className="hidden">Venue</TableHead>
+                                            <TableHead className="hidden">View more (PDF)</TableHead>
+                                            <TableHead className="w-[150px]">Event Status</TableHead>
+                                            <TableHead className="w-[125px]">Status</TableHead>
+                                            <TableHead className="w-[170px]">Participants</TableHead>
+                                            <TableHead className="hidden">Updated</TableHead>
+                                            <TableHead className="w-[72px] text-right">Action</TableHead>
                                         </TableRow>
                                     </TableHeader>
 
                                     <TableBody>
-                                        {filtered.map((p) => (
-                                            <TableRow key={p.id}>
-                                                <TableCell className="font-semibold text-slate-900 dark:text-slate-100">
+                                        {filtered.map((p) => {
+                                            const expanded = expandedRows.has(p.id);
+
+                                            return (
+                                            <React.Fragment key={p.id}>
+                                            <TableRow>
+                                                <TableCell className="whitespace-normal font-semibold text-slate-900 dark:text-slate-100">
                                                     <div className="flex items-center gap-3">
                                                         <div className="grid size-10 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                                                             {(() => {
@@ -637,20 +1042,62 @@ export default function EventManagement(props: PageProps) {
                                                             })()}
                                                         </div>
 
-                                                        <div className="min-w-0">
-                                                            <div className="truncate">{p.title}</div>
+                                                            <div className="min-w-0">
+                                                                <div className="line-clamp-2 leading-snug">{p.title}</div>
+                                                                <button
+                                                                type="button"
+                                                                onClick={() => toggleExpanded(p.id)}
+                                                                className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[#00359c] hover:underline"
+                                                            >
+                                                                <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expanded ? 'rotate-180' : '')} />
+                                                                {expanded ? 'Hide details' : 'Show details'}
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 </TableCell>
 
 
 
-                                                <TableCell className="text-slate-700 dark:text-slate-300">
+                                                <TableCell className="whitespace-normal text-slate-700 dark:text-slate-300">
                                                     <div className="font-medium">{formatDatePill(p.starts_at, p.ends_at)}</div>
                                                     <div className="text-xs text-slate-500 dark:text-slate-400">{daysToGo(p.starts_at) ?? '—'}</div>
                                                 </TableCell>
 
-                                                <TableCell className="text-slate-700 dark:text-slate-300">
+                                                <TableCell className="hidden text-slate-700 dark:text-slate-300">
+                                                    {p.venue ? (
+                                                        <div className="space-y-1">
+                                                            <div className="flex min-w-0 items-center gap-2 font-medium text-slate-900 dark:text-slate-100">
+                                                                <MapPin className="h-4 w-4 shrink-0 text-slate-500" />
+                                                                <span className="truncate">{p.venue.name}</span>
+                                                            </div>
+                                                            {p.venue.address ? (
+                                                                <div className="line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{p.venue.address}</div>
+                                                            ) : null}
+                                                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                                                                {p.venue.google_maps_url ? (
+                                                                    <a
+                                                                        href={p.venue.google_maps_url}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        className="inline-flex items-center gap-1 font-medium text-[#00359c] hover:underline"
+                                                                    >
+                                                                        <ExternalLink className="h-3.5 w-3.5" />
+                                                                        Google Maps
+                                                                    </a>
+                                                                ) : null}
+                                                                {p.venue.is_active === false ? (
+                                                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-900">
+                                                                        Inactive
+                                                                    </span>
+                                                                ) : null}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-xs text-slate-500 dark:text-slate-400">No venue yet</span>
+                                                    )}
+                                                </TableCell>
+
+                                                <TableCell className="hidden text-slate-700 dark:text-slate-300">
                                                     {(() => {
                                                         const pdfUrl = resolvePdfUrl(p.pdf_url);
                                                         if (!pdfUrl) {
@@ -691,7 +1138,7 @@ export default function EventManagement(props: PageProps) {
                                                 </TableCell>
 
 
-                                                <TableCell className="text-slate-700 dark:text-slate-300">{formatDateTimeSafe(p.updated_at)}</TableCell>
+                                                <TableCell className="hidden text-slate-700 dark:text-slate-300">{formatDateTimeSafe(p.updated_at)}</TableCell>
 
                                                 <TableCell className="text-right">
                                                     <DropdownMenu>
@@ -707,6 +1154,10 @@ export default function EventManagement(props: PageProps) {
                                                                 <Pencil className="mr-2 h-4 w-4" />
                                                                 Edit
                                                             </DropdownMenuItem>
+                                                            <DropdownMenuItem onSelect={() => openVenueDialog(p)}>
+                                                                <MapPin className="mr-2 h-4 w-4" />
+                                                                Add venue
+                                                            </DropdownMenuItem>
                                                             <DropdownMenuItem onSelect={() => toggleActive(p)}>
                                                                 <BadgeCheck className="mr-2 h-4 w-4" />
                                                                 {p.is_active ? 'Set Inactive' : 'Set Active'}
@@ -720,10 +1171,40 @@ export default function EventManagement(props: PageProps) {
                                                     </DropdownMenu>
                                                 </TableCell>
                                             </TableRow>
-                                        ))}
+                                            {expanded ? (
+                                                <TableRow className="bg-slate-50/70 dark:bg-slate-900/30">
+                                                    <TableCell colSpan={9} className="whitespace-normal">
+                                                        <div className="grid gap-4 p-3 lg:grid-cols-[1.4fr_1.1fr_1fr_1fr]">
+                                                            <div className="min-w-0">
+                                                                <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Description</div>
+                                                                <div className="mt-1 break-words text-sm leading-6 text-slate-700 dark:text-slate-300">{p.description}</div>
+                                                            </div>
+
+                                                            <div className="min-w-0">
+                                                                <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Venue</div>
+                                                                <div className="mt-1 break-words text-sm text-slate-700 dark:text-slate-300">{renderVenueSummary(p, true)}</div>
+                                                            </div>
+
+                                                            <div className="min-w-0">
+                                                                <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">View More</div>
+                                                                <div className="mt-2">{renderPdfLink(p)}</div>
+                                                            </div>
+
+                                                            <div>
+                                                                <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Updated</div>
+                                                                <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{formatDateTimeSafe(p.updated_at)}</div>
+                                                            </div>
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ) : null}
+                                            </React.Fragment>
+                                            );
+                                        })}
                                     </TableBody>
                                 </Table>
                             </div>
+                            </>
                         )}
                     </div>
                 </div>
@@ -1008,6 +1489,124 @@ export default function EventManagement(props: PageProps) {
                                 </Button>
                             </DialogFooter>
                         </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* Add/Edit Venue Dialog */}
+            <Dialog
+                open={venueTarget !== null}
+                onOpenChange={(open) => {
+                    if (!open) closeVenueDialog();
+                }}
+            >
+                <DialogContent className="w-[calc(100vw-1.5rem)] sm:max-w-[980px]">
+                    <DialogHeader>
+                        <DialogTitle>{venueTarget?.venue ? 'Edit Venue' : 'Add Venue'}</DialogTitle>
+                        <DialogDescription>
+                            Set the venue for{' '}
+                            <span className="font-medium text-slate-900 dark:text-slate-100">{venueTarget?.title}</span>.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form onSubmit={submitVenue} className="space-y-4">
+                        <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
+                            <div className="space-y-4">
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="space-y-1.5 sm:col-span-2">
+                                        <div className="text-sm font-medium">
+                                            Venue name <span className="text-[11px] font-semibold text-red-600">*</span>
+                                        </div>
+                                        <Input
+                                            value={venueForm.data.name}
+                                            onChange={(e) => venueForm.setData('name', e.target.value)}
+                                            placeholder="e.g. Commission on Higher Education"
+                                        />
+                                        {venueForm.errors.name ? <div className="text-xs text-red-600">{venueForm.errors.name}</div> : null}
+                                    </div>
+
+                                    <div className="space-y-1.5 sm:col-span-2">
+                                        <div className="text-sm font-medium">
+                                            Address <span className="text-[11px] font-semibold text-red-600">*</span>
+                                        </div>
+                                        <Textarea
+                                            value={venueForm.data.address}
+                                            onChange={(e) => venueForm.setData('address', e.target.value)}
+                                            placeholder="Full address shown on the public Venue page"
+                                            className="min-h-[90px]"
+                                        />
+                                        {venueForm.errors.address ? <div className="text-xs text-red-600">{venueForm.errors.address}</div> : null}
+                                    </div>
+
+                                    <div className="space-y-1.5 sm:col-span-2">
+                                        <div className="text-sm font-medium">Google Maps link</div>
+                                        <Input
+                                            value={venueForm.data.google_maps_url}
+                                            onChange={(e) => venueForm.setData('google_maps_url', e.target.value)}
+                                            placeholder="https://maps.google.com/?q=..."
+                                        />
+                                        {venueForm.errors.google_maps_url ? (
+                                            <div className="text-xs text-red-600">{venueForm.errors.google_maps_url}</div>
+                                        ) : null}
+                                    </div>
+
+                                    <div className="space-y-1.5 sm:col-span-2">
+                                        <div className="text-sm font-medium">Embed URL or iframe</div>
+                                        <Input
+                                            value={venueForm.data.embed_url}
+                                            onChange={(e) => venueForm.setData('embed_url', e.target.value)}
+                                            placeholder="https://www.google.com/maps/embed?pb=..."
+                                        />
+                                        <div className="text-xs text-slate-600 dark:text-slate-400">
+                                            Optional. Leave blank to build the map from the venue name and address.
+                                        </div>
+                                        {venueForm.errors.embed_url ? <div className="text-xs text-red-600">{venueForm.errors.embed_url}</div> : null}
+                                    </div>
+
+                                    <div className="space-y-1.5 sm:col-span-2">
+                                        <div className="text-sm font-medium">Status</div>
+                                        <Select
+                                            value={venueForm.data.is_active ? 'active' : 'inactive'}
+                                            onValueChange={(v) => venueForm.setData('is_active', v === 'active')}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Select status" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="active">Active</SelectItem>
+                                                <SelectItem value="inactive">Inactive</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <div className="text-xs text-slate-600 dark:text-slate-400">Inactive venues will not show on public pages.</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Map Preview</div>
+                                    {venueForm.data.google_maps_url ? (
+                                        <Button asChild variant="secondary" className="rounded-full">
+                                            <a href={venueForm.data.google_maps_url} target="_blank" rel="noreferrer">
+                                                <ExternalLink className="mr-2 h-4 w-4" />
+                                                Open in Google Maps
+                                            </a>
+                                        </Button>
+                                    ) : null}
+                                </div>
+
+                                <VenueMapPreview embedUrl={venueEmbedPreviewUrl} googleMapsUrl={venueForm.data.google_maps_url} />
+                            </div>
+                        </div>
+
+                        <DialogFooter className="gap-2 sm:gap-0">
+                            <Button type="button" variant="outline" onClick={closeVenueDialog} disabled={venueForm.processing}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" className={PRIMARY_BTN} disabled={venueForm.processing}>
+                                Save venue
+                            </Button>
+                        </DialogFooter>
                     </form>
                 </DialogContent>
             </Dialog>

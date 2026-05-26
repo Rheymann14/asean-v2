@@ -23,7 +23,7 @@ class ProgrammeController extends Controller
                 'user',
                 'participants',
                 'materials',
-                'venues' => fn ($query) => $query->where('is_active', true)->orderBy('id'),
+                'venues' => fn ($query) => $query->orderBy('id'),
             ])
             ->latest('starts_at')
             ->get()
@@ -42,8 +42,12 @@ class ProgrammeController extends Controller
                     'location' => $programme->location,
                     'venue' => $venue
                         ? [
+                            'id' => $venue->id,
                             'name' => $venue->name,
                             'address' => $venue->address,
+                            'google_maps_url' => $venue->google_maps_url,
+                            'embed_url' => $venue->embed_url,
+                            'is_active' => $venue->is_active,
                         ]
                         : null,
                     'image_url' => $programme->image_url,
@@ -521,6 +525,8 @@ foreach ($programme->materials()->get() as $material) {
     }
 }
 $programme->materials()->delete();
+
+$programme->venues()->delete();
 
 
         $programme->delete();

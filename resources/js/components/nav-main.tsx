@@ -22,9 +22,9 @@ export function NavMain({ items = [] }: { items: NavItem[] }) {
     const roleSlug = (userType?.slug ?? '').toUpperCase();
     const isChedLo = roleName === 'CHED LO' || roleSlug === 'CHED-LO';
 
-    // ✅ Start "Page Settings" group from Venue (i.e., after Event List)
+    // Start "Page Settings" group from Section Management after standalone venue management was removed.
     const pageSettingsStartIndex = items.findIndex(
-        (item) => item.title === 'Venue',
+        (item) => item.title === 'Section Management',
     );
 
     const registrationItems =

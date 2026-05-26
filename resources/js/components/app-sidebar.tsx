@@ -16,12 +16,10 @@ import {
     issuancesManagement,
     participant,
     scanner,
-    venueManagement,
 } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/react';
 import {
-    Building2,
     Bus,
     CalendarDays,
     House,
@@ -93,11 +91,6 @@ export function AppSidebar() {
                   icon: Users,
               },
               ...managementNavItems,
-              {
-                  title: 'Venue',
-                  href: venueManagement(),
-                  icon: Building2,
-              },
               {
                   title: 'Section Management',
                   href: '/section-management',
