@@ -2,6 +2,7 @@ import AppLayout from '@/layouts/app-layout';
 import { cn, toDateOnlyTimestamp } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
 import { Head } from '@inertiajs/react';
+import jsQR from 'jsqr';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -35,8 +36,6 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 
-import { BarcodeFormat, DecodeHintType } from '@zxing/library';
-
 import {
     CalendarDays,
     Camera,
@@ -54,8 +53,6 @@ import {
     ShieldCheck,
     UserRound,
 } from 'lucide-react';
-
-import { BrowserQRCodeReader } from '@zxing/browser';
 
 type EventRow = {
     id: number;
@@ -204,29 +201,6 @@ function phaseBadgeClass(phase?: EventRow['phase']) {
         default:
             return 'border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-600/30 dark:bg-slate-800/30 dark:text-slate-300';
     }
-}
-
-function isNotFoundZXingError(err: unknown) {
-    return (
-        !!err &&
-        typeof err === 'object' &&
-        'name' in err &&
-        (err as any).name === 'NotFoundException'
-    );
-}
-
-function isStreamFatalScannerError(err: unknown) {
-    if (!err || typeof err !== 'object' || !('name' in err)) return false;
-
-    const errorName = String((err as { name?: unknown }).name ?? '');
-    return [
-        'NotAllowedError',
-        'NotFoundError',
-        'NotReadableError',
-        'AbortError',
-        'SecurityError',
-        'OverconstrainedError',
-    ].includes(errorName);
 }
 
 function Pill({
@@ -738,9 +712,20 @@ function useScanSounds() {
 ========================= */
 
 type DetectedBarcode = {
+    rawValue?: string;
     boundingBox?: DOMRectReadOnly;
     cornerPoints?: Array<{ x: number; y: number }>;
 };
+
+type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => {
+    detect: (source: HTMLVideoElement) => Promise<DetectedBarcode[]>;
+};
+
+declare global {
+    interface Window {
+        BarcodeDetector?: BarcodeDetectorConstructor;
+    }
+}
 
 function getCoverTransform(
     containerW: number,
@@ -759,6 +744,34 @@ function getCoverTransform(
 
 function clamp(n: number, min: number, max: number) {
     return Math.min(max, Math.max(min, n));
+}
+
+function getCameraErrorMessage(error: unknown) {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        return 'Camera scanning requires HTTPS or localhost. Open this page from a secure URL, or use manual entry.';
+    }
+
+    if (error instanceof DOMException) {
+        if (
+            error.name === 'NotAllowedError' ||
+            error.name === 'SecurityError'
+        ) {
+            return 'Camera permission denied. Please allow camera access for this site.';
+        }
+
+        if (
+            error.name === 'NotFoundError' ||
+            error.name === 'OverconstrainedError'
+        ) {
+            return 'No usable camera was found on this device.';
+        }
+
+        if (error.name === 'NotReadableError' || error.name === 'AbortError') {
+            return 'The camera is already in use or could not be started. Close other apps using the camera, then try again.';
+        }
+    }
+
+    return 'Unable to start camera. Try again.';
 }
 
 export default function Scanner(props: PageProps) {
@@ -793,8 +806,10 @@ export default function Scanner(props: PageProps) {
     const nowTs = Date.now();
 
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
-    const readerRef = React.useRef<BrowserQRCodeReader | null>(null);
-    const controlsRef = React.useRef<{ stop: () => void } | null>(null);
+    const scanCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+    const streamRef = React.useRef<MediaStream | null>(null);
+    const scanFrameRef = React.useRef<number | null>(null);
+    const lastDetectedRef = React.useRef('');
     const lockRef = React.useRef(false);
     const isScanningRef = React.useRef(false);
 
@@ -819,13 +834,17 @@ export default function Scanner(props: PageProps) {
 
         (async () => {
             try {
-                const list = await BrowserQRCodeReader.listVideoInputDevices();
+                if (!navigator.mediaDevices?.enumerateDevices) return;
+
+                const list = await navigator.mediaDevices.enumerateDevices();
                 if (!mounted) return;
 
-                const mapped = list.map((d, idx) => ({
-                    deviceId: d.deviceId,
-                    label: d.label || `Camera ${idx + 1}`,
-                }));
+                const mapped = list
+                    .filter((device) => device.kind === 'videoinput')
+                    .map((d, idx) => ({
+                        deviceId: d.deviceId,
+                        label: d.label || `Camera ${idx + 1}`,
+                    }));
                 setDevices(mapped);
 
                 const preferred =
@@ -1118,15 +1137,6 @@ export default function Scanner(props: PageProps) {
         : undefined;
     const isEventBlocked =
         !!selectedEventPhase && selectedEventPhase !== 'ongoing';
-    const scanHints = React.useMemo(
-        () =>
-            new Map<DecodeHintType, unknown>([
-                [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]],
-                [DecodeHintType.TRY_HARDER, true],
-            ]),
-        [],
-    );
-
     function ensureEventSelected() {
         if (!selectedEventId) {
             const data = {
@@ -1153,14 +1163,57 @@ export default function Scanner(props: PageProps) {
     }
 
     function teardownScanSession() {
-        try {
-            controlsRef.current?.stop?.();
-        } catch {
-            // ignore
+        if (scanFrameRef.current !== null) {
+            window.cancelAnimationFrame(scanFrameRef.current);
+            scanFrameRef.current = null;
         }
-        controlsRef.current = null;
+
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
         hardStopVideoStream();
-        readerRef.current = null;
+    }
+
+    async function readQrValue(
+        video: HTMLVideoElement,
+        detector: InstanceType<BarcodeDetectorConstructor> | null,
+    ) {
+        if (detector) {
+            const codes = await detector.detect(video);
+            const rawValue = codes[0]?.rawValue?.trim();
+
+            if (rawValue) {
+                return rawValue;
+            }
+        }
+
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+
+        if (!width || !height) {
+            return '';
+        }
+
+        const canvas = scanCanvasRef.current ?? document.createElement('canvas');
+        const context = canvas.getContext('2d', {
+            willReadFrequently: true,
+        });
+
+        scanCanvasRef.current = canvas;
+
+        if (!context) {
+            return '';
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        context.drawImage(video, 0, 0, width, height);
+
+        const imageData = context.getImageData(0, 0, width, height);
+        const code = jsQR(imageData.data, width, height, {
+            inversionAttempts: 'attemptBoth',
+        });
+
+        return code?.data?.trim() ?? '';
     }
 
     async function startScan() {
@@ -1173,82 +1226,115 @@ export default function Scanner(props: PageProps) {
         setIsScanning(true);
         isScanningRef.current = true;
         lockRef.current = false;
+        lastDetectedRef.current = '';
         setQrAim('searching');
 
         try {
             teardownScanSession();
 
-            const reader = new BrowserQRCodeReader(scanHints, {
-                delayBetweenScanAttempts: 50,
-                delayBetweenScanSuccess: 350,
+            const videoConstraints: MediaTrackConstraints = {
+                deviceId: deviceId ? { exact: deviceId } : undefined,
+                facingMode: deviceId ? undefined : { ideal: 'environment' },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                ...({
+                    focusMode: 'continuous',
+                    advanced: [{ focusMode: 'continuous' }, { zoom: 1 }],
+                } as unknown as MediaTrackConstraints),
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: videoConstraints,
+                audio: false,
             });
 
-            readerRef.current = reader;
+            streamRef.current = stream;
 
-            const controls = await reader.decodeFromConstraints(
-                {
-                    video: {
-                        deviceId: deviceId ? { exact: deviceId } : undefined,
-                        facingMode: deviceId
-                            ? undefined
-                            : { ideal: 'environment' },
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 },
-                        ...({
-                            focusMode: 'continuous',
-                            advanced: [
-                                { focusMode: 'continuous' },
-                                { zoom: 1 },
-                            ],
-                        } as unknown as MediaTrackConstraints),
-                    },
-                },
-                videoRef.current,
-                async (scanResult, err) => {
-                    if (scanResult) {
-                        const text =
-                            scanResult.getText?.() ?? String(scanResult);
-                        if (!text) return;
+            const video = videoRef.current;
+            if (!video || !isScanningRef.current) {
+                stream.getTracks().forEach((track) => track.stop());
+                return;
+            }
 
-                        if (lockRef.current) return;
-                        lockRef.current = true;
+            video.srcObject = stream;
+            await video.play();
 
-                        pauseScanForVerification();
-                        setStatus('verifying');
-                        await verifyCode(text);
+            if (navigator.mediaDevices?.enumerateDevices) {
+                const list = await navigator.mediaDevices.enumerateDevices();
+                const mapped = list
+                    .filter((device) => device.kind === 'videoinput')
+                    .map((d, idx) => ({
+                        deviceId: d.deviceId,
+                        label: d.label || `Camera ${idx + 1}`,
+                    }));
 
-                        lockRef.current = false;
-                        return;
-                    }
+                setDevices(mapped);
+            }
 
-                    if (
-                        err &&
-                        !isNotFoundZXingError(err) &&
-                        isStreamFatalScannerError(err) &&
-                        isScanningRef.current
-                    ) {
+            const detector = window.BarcodeDetector
+                ? new window.BarcodeDetector({ formats: ['qr_code'] })
+                : null;
+
+            const scan = async () => {
+                if (!isScanningRef.current) {
+                    return;
+                }
+
+                const currentVideo = videoRef.current;
+
+                if (
+                    currentVideo &&
+                    currentVideo.readyState >= 2 &&
+                    !lockRef.current
+                ) {
+                    try {
+                        const rawValue = await readQrValue(
+                            currentVideo,
+                            detector,
+                        );
+
+                        if (!rawValue) {
+                            lastDetectedRef.current = '';
+                        }
+
+                        if (
+                            rawValue &&
+                            rawValue !== lastDetectedRef.current
+                        ) {
+                            lastDetectedRef.current = rawValue;
+                            lockRef.current = true;
+
+                            pauseScanForVerification();
+                            setStatus('verifying');
+                            await verifyCode(rawValue);
+
+                            lockRef.current = false;
+                            return;
+                        }
+                    } catch {
                         teardownScanSession();
-                        setCameraError('Camera interrupted. Please retry.');
+                        setCameraError(
+                            'The camera image could not be scanned. Keep the QR code inside the frame or use manual entry.',
+                        );
                         setStatus('error');
                         setIsScanning(false);
                         isScanningRef.current = false;
                         setQrAim('idle');
+                        return;
                     }
-                },
-            );
+                }
 
-            controlsRef.current = controls as any;
-        } catch (e: any) {
-            const msg =
-                e?.name === 'NotAllowedError'
-                    ? 'Camera permission denied. Please allow camera access.'
-                    : e?.name === 'NotFoundError'
-                      ? 'No camera found on this device.'
-                      : 'Unable to start camera. Try again.';
+                scanFrameRef.current = window.requestAnimationFrame(scan);
+            };
+
+            scanFrameRef.current = window.requestAnimationFrame(scan);
+        } catch (e: unknown) {
+            const msg = getCameraErrorMessage(e);
             teardownScanSession();
             setCameraError(msg);
             setStatus('error');
             setIsScanning(false);
+            isScanningRef.current = false;
             setQrAim('idle');
         }
     }
