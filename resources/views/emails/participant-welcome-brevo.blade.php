@@ -23,7 +23,7 @@
                                 </p>
                              
                                  <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: #475569;">
-                                    Thank you for registering to the CHED-Hosted Welcome Dinner on February 12, 2026. Your registration is confirmed.
+                                    Thank you for registering to {{ $primaryEventTitle }}. Your registration is confirmed.
                                    
                                 </p>
                                 <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: #475569;">
@@ -139,5 +139,4 @@
         </table>
     </body>
 </html>
-
 

@@ -26,8 +26,11 @@ return new class extends Migration
 
         DB::statement('
             UPDATE participant_table_assignments
-            INNER JOIN participant_tables ON participant_tables.id = participant_table_assignments.participant_table_id
-            SET participant_table_assignments.programme_id = participant_tables.programme_id
+            SET programme_id = (
+                SELECT participant_tables.programme_id
+                FROM participant_tables
+                WHERE participant_tables.id = participant_table_assignments.participant_table_id
+            )
         ');
     }
 

@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasColumn('user_types', 'sequence_order')) {
+            return;
+        }
+
         Schema::table('user_types', function (Blueprint $table) {
             $table->unsignedInteger('sequence_order')->default(0)->after('slug');
         });
@@ -21,6 +25,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (! Schema::hasColumn('user_types', 'sequence_order')) {
+            return;
+        }
+
         Schema::table('user_types', function (Blueprint $table) {
             $table->dropColumn('sequence_order');
         });

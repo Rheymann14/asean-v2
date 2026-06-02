@@ -1,7 +1,8 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -10,8 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement('ALTER TABLE venues MODIFY google_maps_url TEXT NULL');
-        DB::statement('ALTER TABLE venues MODIFY embed_url TEXT NULL');
+        Schema::table('venues', function (Blueprint $table) {
+            $table->text('google_maps_url')->nullable()->change();
+            $table->text('embed_url')->nullable()->change();
+        });
     }
 
     /**
@@ -19,7 +22,9 @@ return new class extends Migration
      */
     public function down(): void
     {
-        DB::statement('ALTER TABLE venues MODIFY google_maps_url VARCHAR(255) NULL');
-        DB::statement('ALTER TABLE venues MODIFY embed_url VARCHAR(255) NULL');
+        Schema::table('venues', function (Blueprint $table) {
+            $table->string('google_maps_url')->nullable()->change();
+            $table->string('embed_url')->nullable()->change();
+        });
     }
 };

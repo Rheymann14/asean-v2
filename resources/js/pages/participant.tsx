@@ -129,6 +129,31 @@ type ProgrammeRow = {
     } | null;
     image_url: string | null;
     is_active: boolean;
+    is_registration_active?: boolean;
+    registration_fields?: RegistrationFieldRow[];
+};
+
+type RegistrationFieldType =
+    | 'section'
+    | 'text'
+    | 'textarea'
+    | 'email'
+    | 'tel'
+    | 'date'
+    | 'radio'
+    | 'checkbox'
+    | 'select';
+
+type RegistrationFieldRow = {
+    id: number;
+    field_key?: string | null;
+    label: string;
+    field_type: RegistrationFieldType;
+    options: string[];
+    placeholder?: string | null;
+    help_text?: string | null;
+    is_required: boolean;
+    sort_order: number;
 };
 
 type ParticipantRow = {
@@ -178,6 +203,26 @@ type ParticipantRow = {
         programme_id: number;
         scanned_at?: string | null;
     }[];
+    registration_responses?: Record<string, Record<string, DynamicAnswer>>;
+    asemme10_registration?: {
+        attendee_id: number;
+        submission_id?: number | null;
+        role?: string | null;
+        title?: string | null;
+        badge_name?: string | null;
+        registration_type?: string | null;
+        focal_name?: string | null;
+        focal_email?: string | null;
+        focal_phone?: string | null;
+        focal_organization?: string | null;
+        focal_position?: string | null;
+        consents?: Record<string, unknown>;
+        delegation_details?: Record<string, unknown>;
+        dietary_requirements?: string | null;
+        mobility_or_special_needs?: string | null;
+        submitted_at?: string | null;
+        status?: string | null;
+    };
 
     // optional expanded props if your backend includes them
     country?: Country | null;
@@ -188,8 +233,160 @@ type PageProps = {
     countries?: Country[];
     userTypes?: UserType[];
     participants?: ParticipantRow[];
+    participantPagination?: {
+        current_page: number;
+        last_page: number;
+        per_page: number;
+        total: number;
+        from: number | null;
+        to: number | null;
+    };
+    filters?: {
+        search?: string;
+        country_id?: string;
+        user_type_id?: string;
+        status?: 'all' | 'active' | 'inactive';
+        programme_id?: string;
+    };
     programmes?: ProgrammeRow[];
 };
+
+type DynamicAnswer = string | string[];
+type DynamicResponses = Record<string, Record<string, DynamicAnswer>>;
+
+type Asemme10AttendeeForm = {
+    role: string;
+    title: string;
+    title_other: string;
+    given_name: string;
+    family_name: string;
+    badge_name: string;
+    organization_name: string;
+    position_title: string;
+    email: string;
+    dietary_requirements: string;
+    mobility_or_special_needs: string;
+};
+
+const ASEMME10_REGISTRATION_TYPE_OPTIONS = [
+    {
+        value: 'Country Delegation',
+        label: 'Country Delegation',
+        description: 'For official country delegations',
+    },
+    {
+        value: 'Stakeholder Delegation',
+        label: 'Stakeholder Delegation',
+        description: 'For invited partner organizations',
+    },
+    {
+        value: 'ASEAN Secretariat',
+        label: 'ASEAN Secretariat',
+        description: 'For ASEAN Secretariat staff',
+    },
+    {
+        value: 'European Union',
+        label: 'European Union',
+        description: 'For European Union delegates',
+    },
+    {
+        value: 'Other',
+        label: 'Other',
+        description: 'Use when the type is not listed',
+    },
+];
+
+const ASEMME10_TITLE_OPTIONS = ['Ms', 'Mr', 'Other'] as const;
+
+const ASEMME10_TITLE_SELECT_OPTIONS = [
+    { value: '', label: 'No title' },
+    ...ASEMME10_TITLE_OPTIONS.map((title) => ({
+        value: title,
+        label: title,
+    })),
+];
+
+const ASEMME10_SOCIAL_ACTIVITIES = [
+    'Networking Reception on 24 November',
+    'Gala Dinner on 25 November',
+    'Other',
+] as const;
+
+const ASEMME10_BILATERAL_MEETING_OPTIONS = [
+    { value: '', label: 'Not specified' },
+    { value: 'Yes', label: 'Yes, interested' },
+    { value: 'No', label: 'No' },
+    { value: 'Maybe', label: 'Maybe / to be confirmed' },
+];
+
+const ASEMME10_DELEGATION_DETAIL_FIELDS = [
+    { key: 'minister_responsibility_type', label: 'Minister Responsibility' },
+    { key: 'speech_topic', label: 'Speech Topic' },
+    { key: 'country', label: 'Delegation Country' },
+    { key: 'country_other', label: 'Other Country' },
+    { key: 'registration_type_other', label: 'Other Registration Type' },
+    { key: 'social_activities', label: 'Social Activities' },
+    { key: 'social_activity_other', label: 'Other Social Activity' },
+    { key: 'social_activity_details', label: 'Social Activity Details' },
+    { key: 'bilateral_meeting_interest', label: 'Bilateral Meeting Interest' },
+    { key: 'bilateral_contact_emails', label: 'Bilateral Contact Emails' },
+    { key: 'bilateral_comments', label: 'Bilateral Comments' },
+    { key: 'additional_comments', label: 'Additional Comments' },
+] as const;
+
+const ASEMME10_CONSENT_FIELDS = [
+    { key: 'data_collection', label: 'Data Collection' },
+    { key: 'data_storage', label: 'Data Storage' },
+    { key: 'photo_video', label: 'Photo / Video' },
+] as const;
+
+function asemme10Attendee(role: string): Asemme10AttendeeForm {
+    return {
+        role,
+        title: '',
+        title_other: '',
+        given_name: '',
+        family_name: '',
+        badge_name: '',
+        organization_name: '',
+        position_title: '',
+        email: '',
+        dietary_requirements: '',
+        mobility_or_special_needs: '',
+    };
+}
+
+function defaultAsemme10Attendees(type: string): Asemme10AttendeeForm[] {
+    if (type === 'Stakeholder Delegation') {
+        return [asemme10Attendee('head'), asemme10Attendee('delegate_1')];
+    }
+
+    if (type === 'ASEAN Secretariat' || type === 'European Union') {
+        return [
+            asemme10Attendee('head'),
+            asemme10Attendee('delegate_1'),
+            asemme10Attendee('delegate_2'),
+        ];
+    }
+
+    if (type === 'Other') {
+        return [asemme10Attendee('single_participant')];
+    }
+
+    return [
+        asemme10Attendee('head'),
+        asemme10Attendee('delegate_1'),
+        asemme10Attendee('delegate_2'),
+        asemme10Attendee('delegate_3'),
+    ];
+}
+
+function asemme10RoleLabel(role: string): string {
+    if (role === 'head') return 'Head of Delegation';
+    if (role === 'single_participant') return 'Participant';
+
+    return role.replace('delegate_', 'Delegate ');
+}
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -210,6 +407,7 @@ const ENDPOINTS = {
         store: '/participants',
         update: (id: number) => `/participants/${id}`,
         destroy: (id: number) => `/participants/${id}`,
+        asemme10Delegation: '/participants/asemme10-registration',
     },
     participantProgrammes: {
         join: (participantId: number, programmeId: number) =>
@@ -342,6 +540,8 @@ const STEP_FIELDS: Record<ParticipantFormStep, string[]> = {
         'emergency_contact_phone',
         'emergency_contact_email',
         'is_active',
+        'programme_id',
+        'registration_responses',
     ],
 };
 
@@ -379,6 +579,36 @@ function formatDateTimeSafe(value?: string | null) {
         hour: '2-digit',
         minute: '2-digit',
     }).format(d);
+}
+
+function formatAsemme10RegistrationValue(value: unknown): string {
+    if (Array.isArray(value)) {
+        const values = value
+            .map((item) => String(item).trim())
+            .filter(Boolean);
+
+        return values.length ? values.join(', ') : '-';
+    }
+
+    if (typeof value === 'boolean') return value ? 'Accepted' : 'Not accepted';
+    if (value === null || value === undefined) return '-';
+
+    if (typeof value === 'object') {
+        const entries: string[] = Object.entries(
+            value as Record<string, unknown>,
+        )
+            .map(([key, item]): string | null => {
+                const formatted = formatAsemme10RegistrationValue(item);
+                return formatted === '-' ? null : `${key}: ${formatted}`;
+            })
+            .filter((item): item is string => Boolean(item));
+
+        return entries.length ? entries.join(', ') : '-';
+    }
+
+    const formatted = String(value).trim();
+
+    return formatted === '' ? '-' : formatted;
 }
 
 const FALLBACK_EVENT_IMAGE = '/img/asean_banner_logo.png';
@@ -1088,6 +1318,100 @@ function showToastError(errors: Record<string, string | string[]>) {
     toast.error(message || 'Something went wrong. Please try again.');
 }
 
+type SearchableCommandOption = {
+    value: string;
+    label: string;
+    description?: string;
+};
+
+function SearchableCommandSelect({
+    value,
+    options,
+    placeholder,
+    searchPlaceholder,
+    emptyText,
+    disabled = false,
+    onValueChange,
+}: {
+    value: string;
+    options: SearchableCommandOption[];
+    placeholder: string;
+    searchPlaceholder: string;
+    emptyText: string;
+    disabled?: boolean;
+    onValueChange: (value: string) => void;
+}) {
+    const [open, setOpen] = React.useState(false);
+    const selected = options.find((option) => option.value === value);
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    disabled={disabled}
+                    className="h-10 w-full justify-between text-left font-normal"
+                >
+                    <span
+                        className={cn(
+                            'truncate',
+                            !selected && 'text-slate-500 dark:text-slate-400',
+                        )}
+                    >
+                        {selected?.label ?? placeholder}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent
+                className="w-[--radix-popover-trigger-width] p-0"
+                align="start"
+            >
+                <Command>
+                    <CommandInput placeholder={searchPlaceholder} />
+                    <CommandEmpty>{emptyText}</CommandEmpty>
+                    <CommandList>
+                        <CommandGroup>
+                            {options.map((option) => (
+                                <CommandItem
+                                    key={`${option.value}-${option.label}`}
+                                    value={`${option.label} ${option.description ?? ''}`}
+                                    onSelect={() => {
+                                        onValueChange(option.value);
+                                        setOpen(false);
+                                    }}
+                                >
+                                    <div className="min-w-0">
+                                        <div className="truncate">
+                                            {option.label}
+                                        </div>
+                                        {option.description ? (
+                                            <div className="truncate text-xs text-slate-500 dark:text-slate-400">
+                                                {option.description}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                    <Check
+                                        className={cn(
+                                            'ml-auto h-4 w-4 shrink-0',
+                                            value === option.value
+                                                ? 'opacity-100'
+                                                : 'opacity-0',
+                                        )}
+                                    />
+                                </CommandItem>
+                            ))}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
 function FlagImage({
     code,
     name,
@@ -1133,6 +1457,15 @@ export default function ParticipantPage(props: PageProps) {
     const userTypes: UserType[] = props.userTypes ?? [];
     const participants: ParticipantRow[] = props.participants ?? [];
     const programmes: ProgrammeRow[] = props.programmes ?? [];
+    const participantPagination = props.participantPagination ?? {
+        current_page: 1,
+        last_page: 1,
+        per_page: 10,
+        total: participants.length,
+        from: participants.length ? 1 : null,
+        to: participants.length,
+    };
+    const serverFilters = props.filters ?? {};
 
     // ---------------------------------------
     // UI state
@@ -1141,15 +1474,19 @@ export default function ParticipantPage(props: PageProps) {
         'participants' | 'countries' | 'userTypes'
     >('participants');
 
-    const [participantQuery, setParticipantQuery] = React.useState('');
+    const [participantQuery, setParticipantQuery] = React.useState(
+        serverFilters.search ?? '',
+    );
     const [participantCountryFilter, setParticipantCountryFilter] =
-        React.useState<string>('all');
+        React.useState<string>(serverFilters.country_id ?? 'all');
     const [participantTypeFilter, setParticipantTypeFilter] =
-        React.useState<string>('all');
+        React.useState<string>(serverFilters.user_type_id ?? 'all');
     const [participantStatusFilter, setParticipantStatusFilter] =
-        React.useState<'all' | 'active' | 'inactive'>('all');
+        React.useState<'all' | 'active' | 'inactive'>(
+            serverFilters.status ?? 'all',
+        );
     const [participantEventFilter, setParticipantEventFilter] =
-        React.useState<string>('all');
+        React.useState<string>(serverFilters.programme_id ?? 'all');
     const [participantCountryOpen, setParticipantCountryOpen] =
         React.useState(false);
     const [participantTypeOpen, setParticipantTypeOpen] = React.useState(false);
@@ -1176,8 +1513,12 @@ export default function ParticipantPage(props: PageProps) {
     const [expandedRowIds, setExpandedRowIds] = React.useState<Set<number>>(
         new Set(),
     );
-    const [currentPage, setCurrentPage] = React.useState(1);
-    const [entriesPerPage, setEntriesPerPage] = React.useState(10);
+    const [currentPage, setCurrentPage] = React.useState(
+        participantPagination.current_page,
+    );
+    const [entriesPerPage, setEntriesPerPage] = React.useState(
+        participantPagination.per_page,
+    );
     const [participantFormStep, setParticipantFormStep] =
         React.useState<ParticipantFormStep>(1);
     const [printOrientation, setPrintOrientation] =
@@ -1229,6 +1570,8 @@ export default function ParticipantPage(props: PageProps) {
 
     // dialogs
     const [participantDialogOpen, setParticipantDialogOpen] =
+        React.useState(false);
+    const [asemme10DelegationDialogOpen, setAsemme10DelegationDialogOpen] =
         React.useState(false);
     const [virtualIdDialogOpen, setVirtualIdDialogOpen] = React.useState(false);
     const [virtualIdParticipant, setVirtualIdParticipant] =
@@ -1325,6 +1668,8 @@ export default function ParticipantPage(props: PageProps) {
         emergency_contact_email: string;
         profile_image: File | null;
         remove_profile_image: boolean;
+        programme_id: string;
+        registration_responses: DynamicResponses;
     }>({
         full_name: '',
         email: '',
@@ -1358,6 +1703,64 @@ export default function ParticipantPage(props: PageProps) {
         emergency_contact_email: '',
         profile_image: null,
         remove_profile_image: false,
+        programme_id: '',
+        registration_responses: {},
+    });
+
+    const asemme10DelegationForm = useForm<{
+        programme_id: string;
+        country_id: string;
+        registration_type: string;
+        focal: {
+            name: string;
+            email: string;
+            phone: string;
+            organization: string;
+            position: string;
+        };
+        consents: {
+            data_collection: boolean;
+            data_storage: boolean;
+            photo_video: boolean;
+        };
+        delegation: {
+            registration_type_other: string;
+            social_activities: string[];
+            social_activity_other: string;
+            social_activity_details: string;
+            bilateral_meeting_interest: string;
+            bilateral_contact_emails: string;
+            bilateral_comments: string;
+            additional_comments: string;
+        };
+        attendees: Asemme10AttendeeForm[];
+    }>({
+        programme_id: '',
+        country_id: '',
+        registration_type: 'Country Delegation',
+        focal: {
+            name: '',
+            email: '',
+            phone: '',
+            organization: '',
+            position: '',
+        },
+        consents: {
+            data_collection: false,
+            data_storage: false,
+            photo_video: false,
+        },
+        delegation: {
+            registration_type_other: '',
+            social_activities: [],
+            social_activity_other: '',
+            social_activity_details: '',
+            bilateral_meeting_interest: '',
+            bilateral_contact_emails: '',
+            bilateral_comments: '',
+            additional_comments: '',
+        },
+        attendees: defaultAsemme10Attendees('Country Delegation'),
     });
 
     const countryForm = useForm<{
@@ -1442,6 +1845,8 @@ export default function ParticipantPage(props: PageProps) {
                         imageUrl: resolveProgrammeImage(programme.image_url),
                         phase,
                         isActive,
+                        isRegistrationActive:
+                            !!programme.is_registration_active,
                     };
                 })
                 .sort(
@@ -1461,6 +1866,31 @@ export default function ParticipantPage(props: PageProps) {
             ),
         [normalizedProgrammes],
     );
+    const programmeRowById = React.useMemo(
+        () =>
+            new Map(
+                programmes.map((programme) => [
+                    String(programme.id),
+                    programme,
+                ]),
+            ),
+        [programmes],
+    );
+    const asemme10Programme = React.useMemo(
+        () =>
+            programmes.find((programme) => {
+                const value =
+                    `${programme.tag ?? ''} ${programme.title}`.toLowerCase();
+
+                return (
+                    value.includes('asemme10') ||
+                    value.includes('asemme 10') ||
+                    value.includes('asia-europe meeting of ministers for education') ||
+                    value.includes('10th asia-europe meeting')
+                );
+            }) ?? null,
+        [programmes],
+    );
 
     const filteredProgrammes = React.useMemo(() => {
         const q = programmeQuery.trim().toLowerCase();
@@ -1475,67 +1905,8 @@ export default function ParticipantPage(props: PageProps) {
         });
     }, [normalizedProgrammes, programmeQuery]);
 
-    const filteredParticipants = React.useMemo(() => {
-        const q = participantQuery.trim().toLowerCase();
-        return resolvedParticipants.filter((p) => {
-            const matchesQuery =
-                !q ||
-                p.full_name.toLowerCase().includes(q) ||
-                p.email.toLowerCase().includes(q) ||
-                (p.contact_number ?? '').toLowerCase().includes(q) ||
-                (p.country?.name ?? '').toLowerCase().includes(q) ||
-                (p.user_type?.name ?? '').toLowerCase().includes(q);
-
-            const matchesCountry =
-                participantCountryFilter === 'all' ||
-                String(p.country_id ?? '') === participantCountryFilter;
-
-            const matchesType =
-                participantTypeFilter === 'all' ||
-                String(p.user_type_id ?? '') === participantTypeFilter;
-
-            const matchesStatus =
-                participantStatusFilter === 'all' ||
-                (participantStatusFilter === 'active'
-                    ? p.is_active
-                    : !p.is_active);
-
-            const matchesEvent =
-                participantEventFilter === 'all' ||
-                (p.joined_programme_ids ?? []).includes(
-                    Number(participantEventFilter),
-                );
-
-            return (
-                matchesQuery &&
-                matchesCountry &&
-                matchesType &&
-                matchesStatus &&
-                matchesEvent
-            );
-        });
-    }, [
-        resolvedParticipants,
-        participantQuery,
-        participantCountryFilter,
-        participantTypeFilter,
-        participantStatusFilter,
-        participantEventFilter,
-    ]);
-
-    const totalPages = React.useMemo(
-        () =>
-            Math.max(
-                1,
-                Math.ceil(filteredParticipants.length / entriesPerPage),
-            ),
-        [filteredParticipants.length, entriesPerPage],
-    );
-
-    const paginatedParticipants = React.useMemo(() => {
-        const start = (currentPage - 1) * entriesPerPage;
-        return filteredParticipants.slice(start, start + entriesPerPage);
-    }, [filteredParticipants, currentPage, entriesPerPage]);
+    const totalPages = Math.max(1, participantPagination.last_page);
+    const paginatedParticipants = resolvedParticipants;
 
     const filteredCountries = React.useMemo(() => {
         const q = countryQuery.trim().toLowerCase();
@@ -1556,6 +1927,21 @@ export default function ParticipantPage(props: PageProps) {
             splitCountriesByAsean(
                 countries.filter((country) => country.is_active),
             ),
+        [countries],
+    );
+    const asemme10CountryOptions = React.useMemo(
+        () => [
+            {
+                value: '',
+                label: 'Select country',
+                description: 'Choose the country represented by this delegation',
+            },
+            ...countries.map((country) => ({
+                value: String(country.id),
+                label: country.name,
+                description: country.code,
+            })),
+        ],
         [countries],
     );
 
@@ -1634,15 +2020,86 @@ export default function ParticipantPage(props: PageProps) {
     }, [participantForm.errors]);
 
     React.useEffect(() => {
-        setCurrentPage(1);
+        setParticipantQuery(serverFilters.search ?? '');
+        setParticipantCountryFilter(serverFilters.country_id ?? 'all');
+        setParticipantTypeFilter(serverFilters.user_type_id ?? 'all');
+        setParticipantStatusFilter(serverFilters.status ?? 'all');
+        setParticipantEventFilter(serverFilters.programme_id ?? 'all');
+        setCurrentPage(participantPagination.current_page);
+        setEntriesPerPage(participantPagination.per_page);
     }, [
-        participantQuery,
-        participantCountryFilter,
-        participantTypeFilter,
-        participantStatusFilter,
-        participantEventFilter,
-        entriesPerPage,
+        serverFilters.search,
+        serverFilters.country_id,
+        serverFilters.user_type_id,
+        serverFilters.status,
+        serverFilters.programme_id,
+        participantPagination.current_page,
+        participantPagination.per_page,
     ]);
+
+    const participantVisitTimer = React.useRef<number | null>(null);
+
+    const visitParticipants = React.useCallback(
+        (
+            overrides: Partial<{
+                search: string;
+                country_id: string;
+                user_type_id: string;
+                status: 'all' | 'active' | 'inactive';
+                programme_id: string;
+                page: number;
+                per_page: number;
+            }> = {},
+            debounce = false,
+        ) => {
+            if (participantVisitTimer.current) {
+                window.clearTimeout(participantVisitTimer.current);
+            }
+
+            const params = {
+                search: participantQuery.trim(),
+                country_id: participantCountryFilter,
+                user_type_id: participantTypeFilter,
+                status: participantStatusFilter,
+                programme_id: participantEventFilter,
+                page: currentPage,
+                per_page: entriesPerPage,
+                ...overrides,
+            };
+
+            const run = () => {
+                router.get('/participant', params, {
+                    preserveState: true,
+                    preserveScroll: true,
+                    replace: true,
+                    only: ['participants', 'participantPagination', 'filters'],
+                });
+            };
+
+            if (debounce) {
+                participantVisitTimer.current = window.setTimeout(run, 300);
+            } else {
+                run();
+            }
+        },
+        [
+            participantQuery,
+            participantCountryFilter,
+            participantTypeFilter,
+            participantStatusFilter,
+            participantEventFilter,
+            currentPage,
+            entriesPerPage,
+        ],
+    );
+
+    React.useEffect(() => {
+        return () => {
+            if (participantVisitTimer.current) {
+                window.clearTimeout(participantVisitTimer.current);
+            }
+        };
+    }, []);
 
     const toggleRowExpand = React.useCallback((id: number) => {
         setExpandedRowIds((prev) => {
@@ -1670,6 +2127,11 @@ export default function ParticipantPage(props: PageProps) {
         participantEventFilter === 'all'
             ? null
             : programmeById.get(participantEventFilter);
+    const canAddAsemme10Delegation =
+        participantEventFilter !== 'all' &&
+        !!asemme10Programme &&
+        participantEventFilter === String(asemme10Programme.id);
+    const isAsemme10RegistrationView = canAddAsemme10Delegation;
     const selectedStatusLabel =
         participantStatusFilter === 'all'
             ? 'All Statuses'
@@ -1685,47 +2147,72 @@ export default function ParticipantPage(props: PageProps) {
     const isOtherParticipantType =
         (selectedFormUserType?.slug ?? '').toLowerCase() === 'other' ||
         (selectedFormUserType?.name ?? '').toLowerCase() === 'other';
+    const selectedRegistrationProgramme = participantForm.data.programme_id
+        ? (programmeRowById.get(participantForm.data.programme_id) ?? null)
+        : null;
+    const selectedRegistrationFields =
+        selectedRegistrationProgramme?.registration_fields ?? [];
 
-    React.useEffect(() => {
-        let active = true;
-        const pending = filteredParticipants.filter(
-            (p) => p.qr_payload && !qrCacheRef.current[p.id],
-        );
+    function defaultProgrammeId(participant?: ParticipantRow | null) {
+        if (participantEventFilter !== 'all') {
+            return participantEventFilter;
+        }
 
-        if (pending.length === 0) return undefined;
+        const firstJoined = participant?.joined_programme_ids?.[0];
+        if (firstJoined) {
+            return String(firstJoined);
+        }
 
-        Promise.all(
-            pending.map(async (p) => {
-                try {
-                    const dataUrl = await QRCode.toDataURL(p.qr_payload ?? '', {
-                        margin: 1,
-                        scale: 8,
-                        errorCorrectionLevel: 'M',
-                    });
-                    return { id: p.id, dataUrl };
-                } catch {
-                    return null;
-                }
-            }),
-        ).then((results) => {
-            if (!active) return;
-            const next = { ...qrCacheRef.current };
-            let changed = false;
-            results.forEach((result) => {
-                if (!result) return;
-                next[result.id] = result.dataUrl;
-                changed = true;
-            });
-            if (changed) {
-                qrCacheRef.current = next;
-                setQrDataUrls(next);
-            }
-        });
+        const preferred =
+            normalizedProgrammes.find(
+                (programme) => programme.isRegistrationActive,
+            ) ??
+            normalizedProgrammes.find(
+                (programme) =>
+                    programme.isActive &&
+                    (programme.phase === 'ongoing' ||
+                        programme.phase === 'upcoming'),
+            ) ?? normalizedProgrammes[0];
 
-        return () => {
-            active = false;
+        return preferred ? String(preferred.id) : '';
+    }
+
+    function responsesForProgramme(
+        participant: ParticipantRow | null,
+        programmeId: string,
+    ): DynamicResponses {
+        if (!programmeId) return {};
+
+        return {
+            [programmeId]:
+                participant?.registration_responses?.[programmeId] ?? {},
         };
-    }, [filteredParticipants]);
+    }
+
+    function setDynamicAnswer(fieldId: number, value: DynamicAnswer) {
+        const programmeId = participantForm.data.programme_id;
+        if (!programmeId) return;
+
+        participantForm.setData('registration_responses', {
+            ...participantForm.data.registration_responses,
+            [programmeId]: {
+                ...(participantForm.data.registration_responses[programmeId] ??
+                    {}),
+                [String(fieldId)]: value,
+            },
+        });
+    }
+
+    function dynamicAnswer(fieldId: number): DynamicAnswer {
+        const programmeId = participantForm.data.programme_id;
+        if (!programmeId) return '';
+
+        return (
+            participantForm.data.registration_responses[programmeId]?.[
+                String(fieldId)
+            ] ?? ''
+        );
+    }
 
     React.useEffect(() => {
         if (!isOtherParticipantType && participantForm.data.other_user_type) {
@@ -1773,9 +2260,178 @@ export default function ParticipantPage(props: PageProps) {
         toast.success('Uploaded profile image removed.');
     }
 
+    function openAsemme10Delegation() {
+        if (!asemme10Programme) {
+            toast.error('Create or activate the ASEMME10 event first.');
+            return;
+        }
+
+        const registrationType = 'Country Delegation';
+        asemme10DelegationForm.setData({
+            programme_id: String(asemme10Programme.id),
+            country_id:
+                participantCountryFilter !== 'all'
+                    ? participantCountryFilter
+                    : '',
+            registration_type: registrationType,
+            focal: {
+                name: '',
+                email: '',
+                phone: '',
+                organization: '',
+                position: '',
+            },
+            consents: {
+                data_collection: false,
+                data_storage: false,
+                photo_video: false,
+            },
+            delegation: {
+                registration_type_other: '',
+                social_activities: [],
+                social_activity_other: '',
+                social_activity_details: '',
+                bilateral_meeting_interest: '',
+                bilateral_contact_emails: '',
+                bilateral_comments: '',
+                additional_comments: '',
+            },
+            attendees: defaultAsemme10Attendees(registrationType),
+        });
+        asemme10DelegationForm.clearErrors();
+        setAsemme10DelegationDialogOpen(true);
+    }
+
+    function setAsemme10RegistrationType(value: string) {
+        asemme10DelegationForm.setData({
+            ...asemme10DelegationForm.data,
+            registration_type: value,
+            delegation: {
+                ...asemme10DelegationForm.data.delegation,
+                registration_type_other:
+                    value === 'Other'
+                        ? asemme10DelegationForm.data.delegation
+                              .registration_type_other
+                        : '',
+            },
+            attendees: defaultAsemme10Attendees(value),
+        });
+    }
+
+    function updateAsemme10Focal(
+        field: keyof typeof asemme10DelegationForm.data.focal,
+        value: string,
+    ) {
+        asemme10DelegationForm.setData('focal', {
+            ...asemme10DelegationForm.data.focal,
+            [field]: value,
+        });
+    }
+
+    function updateAsemme10Delegation(
+        field: keyof typeof asemme10DelegationForm.data.delegation,
+        value: string | string[],
+    ) {
+        asemme10DelegationForm.setData('delegation', {
+            ...asemme10DelegationForm.data.delegation,
+            [field]: value,
+        });
+    }
+
+    function updateAsemme10Attendee(
+        index: number,
+        field: keyof Asemme10AttendeeForm,
+        value: string,
+    ) {
+        asemme10DelegationForm.setData(
+            'attendees',
+            asemme10DelegationForm.data.attendees.map((attendee, attendeeIndex) =>
+                attendeeIndex === index
+                    ? { ...attendee, [field]: value }
+                    : attendee,
+            ),
+        );
+    }
+
+    function setAsemme10AttendeeTitle(index: number, value: string) {
+        asemme10DelegationForm.setData(
+            'attendees',
+            asemme10DelegationForm.data.attendees.map((attendee, attendeeIndex) =>
+                attendeeIndex === index
+                    ? {
+                          ...attendee,
+                          title: value,
+                          title_other:
+                              value === 'Other' ? attendee.title_other : '',
+                      }
+                    : attendee,
+            ),
+        );
+    }
+
+    function addAsemme10Attendee() {
+        const used = new Set(
+            asemme10DelegationForm.data.attendees.map((attendee) => attendee.role),
+        );
+        let index = 1;
+        while (used.has(`delegate_${index}`)) index += 1;
+
+        asemme10DelegationForm.setData('attendees', [
+            ...asemme10DelegationForm.data.attendees,
+            asemme10Attendee(`delegate_${index}`),
+        ]);
+    }
+
+    function removeAsemme10Attendee(index: number) {
+        asemme10DelegationForm.setData(
+            'attendees',
+            asemme10DelegationForm.data.attendees.filter(
+                (_, attendeeIndex) => attendeeIndex !== index,
+            ),
+        );
+    }
+
+    function toggleAsemme10SocialActivity(activity: string, checked: boolean) {
+        const current = asemme10DelegationForm.data.delegation.social_activities;
+        const next = checked
+            ? Array.from(new Set([...current, activity]))
+            : current.filter((item) => item !== activity);
+
+        asemme10DelegationForm.setData('delegation', {
+            ...asemme10DelegationForm.data.delegation,
+            social_activities: next,
+            social_activity_other:
+                activity === 'Other' && !checked
+                    ? ''
+                    : asemme10DelegationForm.data.delegation
+                          .social_activity_other,
+        });
+    }
+
+    function submitAsemme10Delegation(e: React.FormEvent) {
+        e.preventDefault();
+
+        asemme10DelegationForm.post(ENDPOINTS.participants.asemme10Delegation, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setAsemme10DelegationDialogOpen(false);
+                toast.success('ASEMME10 delegation participants added.');
+            },
+            onError: () => {
+                toast.error('Unable to save ASEMME10 delegation registration.');
+            },
+        });
+    }
+
     function openAddParticipant() {
         setEditingParticipant(null);
         participantForm.reset();
+        const programmeId = defaultProgrammeId(null);
+        participantForm.setData('programme_id', programmeId);
+        participantForm.setData(
+            'registration_responses',
+            responsesForProgramme(null, programmeId),
+        );
         participantForm.setData('profile_image', null);
         participantForm.setData('remove_profile_image', false);
         if (participantProfileInputRef.current) {
@@ -1789,6 +2445,7 @@ export default function ParticipantPage(props: PageProps) {
 
     function openEditParticipant(p: ParticipantRow) {
         setEditingParticipant(p);
+        const programmeId = defaultProgrammeId(p);
         participantForm.setData({
             full_name: p.full_name ?? '',
             email: p.email ?? '',
@@ -1822,6 +2479,8 @@ export default function ParticipantPage(props: PageProps) {
             emergency_contact_email: p.emergency_contact_email ?? '',
             profile_image: null,
             remove_profile_image: false,
+            programme_id: programmeId,
+            registration_responses: responsesForProgramme(p, programmeId),
         });
         if (participantProfileInputRef.current) {
             participantProfileInputRef.current.value = '';
@@ -1883,6 +2542,8 @@ export default function ParticipantPage(props: PageProps) {
             emergency_contact_email:
                 data.emergency_contact_email.trim() || null,
             remove_profile_image: data.remove_profile_image,
+            programme_id: data.programme_id ? Number(data.programme_id) : null,
+            registration_responses: data.registration_responses,
             ...(data.profile_image
                 ? { profile_image: data.profile_image }
                 : {}),
@@ -1894,7 +2555,15 @@ export default function ParticipantPage(props: PageProps) {
         ) => {
             showToastError(errors);
             for (const [step, fields] of Object.entries(STEP_FIELDS)) {
-                if (fields.some((field) => !!errors[field])) {
+                if (
+                    fields.some(
+                        (field) =>
+                            !!errors[field] ||
+                            Object.keys(errors).some((key) =>
+                                key.startsWith(`${field}.`),
+                            ),
+                    )
+                ) {
                     setParticipantFormStep(Number(step) as ParticipantFormStep);
                     break;
                 }
@@ -2281,6 +2950,166 @@ export default function ParticipantPage(props: PageProps) {
         });
     }
 
+    function registrationFieldError(fieldId: number) {
+        const programmeId = participantForm.data.programme_id;
+        if (!programmeId) return null;
+
+        return (
+            (participantForm.errors as Record<string, string>)[
+                `registration_responses.${programmeId}.${fieldId}`
+            ] ?? null
+        );
+    }
+
+    function asemme10DelegationError(key: string) {
+        return (
+            (asemme10DelegationForm.errors as Record<string, string>)[key] ??
+            null
+        );
+    }
+
+    function asemme10AttendeeError(
+        index: number,
+        field: keyof Asemme10AttendeeForm,
+    ) {
+        return asemme10DelegationError(`attendees.${index}.${field}`);
+    }
+
+    function renderRegistrationField(field: RegistrationFieldRow) {
+        const error = registrationFieldError(field.id);
+        const value = dynamicAnswer(field.id);
+        const label = (
+            <div className="text-sm font-medium">
+                {field.label}
+                {field.is_required ? (
+                    <span className="text-[11px] font-semibold text-red-600">
+                        {' '}
+                        *
+                    </span>
+                ) : null}
+            </div>
+        );
+
+        if (field.field_type === 'section') {
+            return (
+                <div
+                    key={field.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 sm:col-span-2 dark:border-slate-800 dark:bg-slate-900/40"
+                >
+                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        {field.label}
+                    </div>
+                    {field.help_text ? (
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                            {field.help_text}
+                        </div>
+                    ) : null}
+                </div>
+            );
+        }
+
+        return (
+            <div key={field.id} className="space-y-1.5 sm:col-span-2">
+                {label}
+                {field.field_type === 'textarea' ? (
+                    <textarea
+                        value={typeof value === 'string' ? value : ''}
+                        onChange={(event) =>
+                            setDynamicAnswer(field.id, event.target.value)
+                        }
+                        placeholder={field.placeholder ?? undefined}
+                        className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    />
+                ) : field.field_type === 'radio' ? (
+                    <div className="grid gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                        {(field.options ?? []).map((option) => (
+                            <label
+                                key={option}
+                                className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"
+                            >
+                                <input
+                                    type="radio"
+                                    checked={value === option}
+                                    onChange={() =>
+                                        setDynamicAnswer(field.id, option)
+                                    }
+                                />
+                                <span>{option}</span>
+                            </label>
+                        ))}
+                    </div>
+                ) : field.field_type === 'checkbox' ? (
+                    <div className="grid gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                        {(field.options ?? []).map((option) => {
+                            const values = Array.isArray(value) ? value : [];
+
+                            return (
+                                <label
+                                    key={option}
+                                    className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"
+                                >
+                                    <Checkbox
+                                        checked={values.includes(option)}
+                                        onCheckedChange={(checked) => {
+                                            const next = new Set(values);
+                                            if (checked) next.add(option);
+                                            else next.delete(option);
+                                            setDynamicAnswer(
+                                                field.id,
+                                                Array.from(next),
+                                            );
+                                        }}
+                                    />
+                                    <span>{option}</span>
+                                </label>
+                            );
+                        })}
+                    </div>
+                ) : field.field_type === 'select' ? (
+                    <select
+                        value={typeof value === 'string' ? value : ''}
+                        onChange={(event) =>
+                            setDynamicAnswer(field.id, event.target.value)
+                        }
+                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:ring-2 focus-visible:ring-[#00359c]/30 focus-visible:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    >
+                        <option value="">Select an option</option>
+                        {(field.options ?? []).map((option) => (
+                            <option key={option} value={option}>
+                                {option}
+                            </option>
+                        ))}
+                    </select>
+                ) : (
+                    <Input
+                        type={
+                            field.field_type === 'email'
+                                ? 'email'
+                                : field.field_type === 'tel'
+                                  ? 'tel'
+                                  : field.field_type === 'date'
+                                    ? 'date'
+                                    : 'text'
+                        }
+                        value={typeof value === 'string' ? value : ''}
+                        onChange={(event) =>
+                            setDynamicAnswer(field.id, event.target.value)
+                        }
+                        placeholder={field.placeholder ?? undefined}
+                    />
+                )}
+                {field.help_text ? (
+                    <div className="text-xs text-slate-600 dark:text-slate-400">
+                        {field.help_text}
+                    </div>
+                ) : null}
+                {error ? (
+                    <div className="text-xs text-red-600">{error}</div>
+                ) : null}
+            </div>
+        );
+    }
+
     const breadcrumbItems = React.useMemo(() => breadcrumbs, []);
 
     return (
@@ -2305,16 +3134,30 @@ export default function ParticipantPage(props: PageProps) {
 
                         <div className="flex flex-wrap gap-2">
                             {activeTab === 'participants' ? (
-                                <Button
-                                    onClick={openAddParticipant}
-                                    className={cn(
-                                        'w-full sm:w-auto',
-                                        PRIMARY_BTN,
-                                    )}
-                                >
-                                    <Plus className="mr-2 h-4 w-4" />
-                                    Add Participant
-                                </Button>
+                                <>
+                                    {canAddAsemme10Delegation ? (
+                                        <Button
+                                            onClick={openAsemme10Delegation}
+                                            variant="outline"
+                                            className="w-full sm:w-auto"
+                                        >
+                                            <Users className="mr-2 h-4 w-4" />
+                                            Add ASEMME10 Delegation
+                                        </Button>
+                                    ) : null}
+                                    {!canAddAsemme10Delegation ? (
+                                        <Button
+                                            onClick={openAddParticipant}
+                                            className={cn(
+                                                'w-full sm:w-auto',
+                                                PRIMARY_BTN,
+                                            )}
+                                        >
+                                            <Plus className="mr-2 h-4 w-4" />
+                                            Add Participant
+                                        </Button>
+                                    ) : null}
+                                </>
                             ) : activeTab === 'countries' ? (
                                 <Button
                                     onClick={openAddCountry}
@@ -2376,11 +3219,19 @@ export default function ParticipantPage(props: PageProps) {
                                             <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-slate-500" />
                                             <Input
                                                 value={participantQuery}
-                                                onChange={(e) =>
-                                                    setParticipantQuery(
-                                                        e.target.value,
-                                                    )
-                                                }
+                                                onChange={(e) => {
+                                                    const value =
+                                                        e.target.value;
+                                                    setParticipantQuery(value);
+                                                    setCurrentPage(1);
+                                                    visitParticipants(
+                                                        {
+                                                            search: value,
+                                                            page: 1,
+                                                        },
+                                                        true,
+                                                    );
+                                                }}
                                                 placeholder="Search name, email, country, type..."
                                                 className="h-9 pl-9 text-xs"
                                             />
@@ -2427,6 +3278,16 @@ export default function ParticipantPage(props: PageProps) {
                                                                     setParticipantCountryFilter(
                                                                         'all',
                                                                     );
+                                                                    setCurrentPage(
+                                                                        1,
+                                                                    );
+                                                                    visitParticipants(
+                                                                        {
+                                                                            country_id:
+                                                                                'all',
+                                                                            page: 1,
+                                                                        },
+                                                                    );
                                                                     setParticipantCountryOpen(
                                                                         false,
                                                                     );
@@ -2457,6 +3318,18 @@ export default function ParticipantPage(props: PageProps) {
                                                                                 String(
                                                                                     c.id,
                                                                                 ),
+                                                                            );
+                                                                            setCurrentPage(
+                                                                                1,
+                                                                            );
+                                                                            visitParticipants(
+                                                                                {
+                                                                                    country_id:
+                                                                                        String(
+                                                                                            c.id,
+                                                                                        ),
+                                                                                    page: 1,
+                                                                                },
                                                                             );
                                                                             setParticipantCountryOpen(
                                                                                 false,
@@ -2514,6 +3387,18 @@ export default function ParticipantPage(props: PageProps) {
                                                                                     String(
                                                                                         c.id,
                                                                                     ),
+                                                                                );
+                                                                                setCurrentPage(
+                                                                                    1,
+                                                                                );
+                                                                                visitParticipants(
+                                                                                    {
+                                                                                        country_id:
+                                                                                            String(
+                                                                                                c.id,
+                                                                                            ),
+                                                                                        page: 1,
+                                                                                    },
                                                                                 );
                                                                                 setParticipantCountryOpen(
                                                                                     false,
@@ -2602,6 +3487,16 @@ export default function ParticipantPage(props: PageProps) {
                                                                     setParticipantTypeFilter(
                                                                         'all',
                                                                     );
+                                                                    setCurrentPage(
+                                                                        1,
+                                                                    );
+                                                                    visitParticipants(
+                                                                        {
+                                                                            user_type_id:
+                                                                                'all',
+                                                                            page: 1,
+                                                                        },
+                                                                    );
                                                                     setParticipantTypeOpen(
                                                                         false,
                                                                     );
@@ -2630,6 +3525,18 @@ export default function ParticipantPage(props: PageProps) {
                                                                                 String(
                                                                                     u.id,
                                                                                 ),
+                                                                            );
+                                                                            setCurrentPage(
+                                                                                1,
+                                                                            );
+                                                                            visitParticipants(
+                                                                                {
+                                                                                    user_type_id:
+                                                                                        String(
+                                                                                            u.id,
+                                                                                        ),
+                                                                                    page: 1,
+                                                                                },
                                                                             );
                                                                             setParticipantTypeOpen(
                                                                                 false,
@@ -2715,6 +3622,15 @@ export default function ParticipantPage(props: PageProps) {
                                                                         setParticipantStatusFilter(
                                                                             status.value as any,
                                                                         );
+                                                                        setCurrentPage(
+                                                                            1,
+                                                                        );
+                                                                        visitParticipants(
+                                                                            {
+                                                                                status: status.value as any,
+                                                                                page: 1,
+                                                                            },
+                                                                        );
                                                                         setParticipantStatusOpen(
                                                                             false,
                                                                         );
@@ -2781,6 +3697,16 @@ export default function ParticipantPage(props: PageProps) {
                                                                     setParticipantEventFilter(
                                                                         'all',
                                                                     );
+                                                                    setCurrentPage(
+                                                                        1,
+                                                                    );
+                                                                    visitParticipants(
+                                                                        {
+                                                                            programme_id:
+                                                                                'all',
+                                                                            page: 1,
+                                                                        },
+                                                                    );
                                                                     setParticipantEventOpen(
                                                                         false,
                                                                     );
@@ -2835,6 +3761,18 @@ export default function ParticipantPage(props: PageProps) {
                                                                                     String(
                                                                                         event.id,
                                                                                     ),
+                                                                                );
+                                                                                setCurrentPage(
+                                                                                    1,
+                                                                                );
+                                                                                visitParticipants(
+                                                                                    {
+                                                                                        programme_id:
+                                                                                            String(
+                                                                                                event.id,
+                                                                                            ),
+                                                                                        page: 1,
+                                                                                    },
                                                                                 );
                                                                                 setParticipantEventOpen(
                                                                                     false,
@@ -2939,7 +3877,7 @@ export default function ParticipantPage(props: PageProps) {
                             </CardHeader>
 
                             <CardContent>
-                                {filteredParticipants.length === 0 ? (
+                                {participantPagination.total === 0 ? (
                                     <EmptyState
                                         icon={<Users className="h-5 w-5" />}
                                         title="No participants found"
@@ -2952,13 +3890,17 @@ export default function ParticipantPage(props: PageProps) {
                                             <select
                                                 className="h-8 w-[70px] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus-visible:ring-slate-600"
                                                 value={String(entriesPerPage)}
-                                                onChange={(event) =>
-                                                    setEntriesPerPage(
-                                                        Number(
-                                                            event.target.value,
-                                                        ),
-                                                    )
-                                                }
+                                                onChange={(event) => {
+                                                    const value = Number(
+                                                        event.target.value,
+                                                    );
+                                                    setEntriesPerPage(value);
+                                                    setCurrentPage(1);
+                                                    visitParticipants({
+                                                        per_page: value,
+                                                        page: 1,
+                                                    });
+                                                }}
                                             >
                                                 {ENTRIES_PER_PAGE_OPTIONS.map(
                                                     (n) => (
@@ -2974,19 +3916,11 @@ export default function ParticipantPage(props: PageProps) {
                                             <span>entries</span>
                                             <span className="ml-2">
                                                 Showing{' '}
-                                                {filteredParticipants.length ===
-                                                0
-                                                    ? 0
-                                                    : (currentPage - 1) *
-                                                          entriesPerPage +
-                                                      1}{' '}
+                                                {participantPagination.from ??
+                                                    0}{' '}
                                                 to{' '}
-                                                {Math.min(
-                                                    currentPage *
-                                                        entriesPerPage,
-                                                    filteredParticipants.length,
-                                                )}{' '}
-                                                of {filteredParticipants.length}{' '}
+                                                {participantPagination.to ?? 0}{' '}
+                                                of {participantPagination.total}{' '}
                                                 entries
                                             </span>
                                             <Button
@@ -3085,13 +4019,19 @@ export default function ParticipantPage(props: PageProps) {
                                                     </TableHead>
                                                     <TableHead>Email</TableHead>
                                                     <TableHead className="w-[200px]">
-                                                        User Type
+                                                        {isAsemme10RegistrationView
+                                                            ? 'Role'
+                                                            : 'User Type'}
                                                     </TableHead>
                                                     <TableHead className="w-[140px]">
-                                                        Status
+                                                        {isAsemme10RegistrationView
+                                                            ? 'Registration'
+                                                            : 'Status'}
                                                     </TableHead>
                                                     <TableHead className="w-[140px]">
-                                                        Created
+                                                        {isAsemme10RegistrationView
+                                                            ? 'Submitted'
+                                                            : 'Created'}
                                                     </TableHead>
                                                     <TableHead className="w-[80px] text-right">
                                                         Action
@@ -3109,10 +4049,22 @@ export default function ParticipantPage(props: PageProps) {
                                                             expandedRowIds.has(
                                                                 p.id,
                                                             );
+                                                        const asemme10Registration =
+                                                            p.asemme10_registration;
+                                                        const asemme10DelegationDetails =
+                                                            asemme10Registration?.delegation_details ??
+                                                            {};
+                                                        const asemme10Consents =
+                                                            asemme10Registration?.consents ??
+                                                            {};
 
                                                         return (
                                                             <React.Fragment
-                                                                key={p.id}
+                                                                key={
+                                                                    asemme10Registration?.attendee_id
+                                                                        ? `asemme10-${asemme10Registration.attendee_id}`
+                                                                        : p.id
+                                                                }
                                                             >
                                                                 <TableRow
                                                                     className={cn(
@@ -3172,6 +4124,15 @@ export default function ParticipantPage(props: PageProps) {
                                                                                 p.full_name
                                                                             }
                                                                         </div>
+                                                                        {isAsemme10RegistrationView &&
+                                                                            asemme10Registration?.badge_name && (
+                                                                                <div className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                                                                                    Badge:{' '}
+                                                                                    {
+                                                                                        asemme10Registration.badge_name
+                                                                                    }
+                                                                                </div>
+                                                                            )}
                                                                     </TableCell>
 
                                                                     <TableCell>
@@ -3226,23 +4187,47 @@ export default function ParticipantPage(props: PageProps) {
                                                                         }
                                                                     </TableCell>
                                                                     <TableCell className="text-slate-700 dark:text-slate-300">
-                                                                        {p
-                                                                            .user_type
-                                                                            ?.name ??
-                                                                            '—'}
+                                                                        {isAsemme10RegistrationView
+                                                                            ? (asemme10Registration?.role ??
+                                                                              '—')
+                                                                            : (p
+                                                                                  .user_type
+                                                                                  ?.name ??
+                                                                              '—')}
                                                                     </TableCell>
 
-                                                                    <TableCell>
-                                                                        <StatusBadge
-                                                                            active={
-                                                                                p.is_active
-                                                                            }
-                                                                        />
+                                                                    <TableCell className="text-slate-700 dark:text-slate-300">
+                                                                        {isAsemme10RegistrationView ? (
+                                                                            <div className="space-y-1">
+                                                                                <div>
+                                                                                    {asemme10Registration?.registration_type ??
+                                                                                        '—'}
+                                                                                </div>
+                                                                                {asemme10Registration?.status && (
+                                                                                    <Badge
+                                                                                        variant="secondary"
+                                                                                        className="rounded-full text-[11px]"
+                                                                                    >
+                                                                                        {
+                                                                                            asemme10Registration.status
+                                                                                        }
+                                                                                    </Badge>
+                                                                                )}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <StatusBadge
+                                                                                active={
+                                                                                    p.is_active
+                                                                                }
+                                                                            />
+                                                                        )}
                                                                     </TableCell>
 
                                                                     <TableCell className="text-slate-700 dark:text-slate-300">
                                                                         {formatDateSafe(
-                                                                            p.created_at,
+                                                                            isAsemme10RegistrationView
+                                                                                ? asemme10Registration?.submitted_at
+                                                                                : p.created_at,
                                                                         )}
                                                                     </TableCell>
 
@@ -3535,6 +4520,150 @@ export default function ParticipantPage(props: PageProps) {
                                                                                     )}
                                                                                 </div>
                                                                             </div>
+                                                                            {isAsemme10RegistrationView &&
+                                                                                asemme10Registration && (
+                                                                                    <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                                                                                        <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                            ASEMME10
+                                                                                            Registration
+                                                                                        </div>
+                                                                                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                                                            <div>
+                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                    Focal
+                                                                                                    Person
+                                                                                                </div>
+                                                                                                <div className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
+                                                                                                    <div>
+                                                                                                        {asemme10Registration.focal_name ??
+                                                                                                            'â€”'}
+                                                                                                    </div>
+                                                                                                    {asemme10Registration.focal_email && (
+                                                                                                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                                                                            {
+                                                                                                                asemme10Registration.focal_email
+                                                                                                            }
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                    {asemme10Registration.focal_phone && (
+                                                                                                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                                                                            {
+                                                                                                                asemme10Registration.focal_phone
+                                                                                                            }
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+
+                                                                                            <div>
+                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                    Focal
+                                                                                                    Organization
+                                                                                                </div>
+                                                                                                <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                    {asemme10Registration.focal_organization ??
+                                                                                                        'â€”'}
+                                                                                                </div>
+                                                                                                {asemme10Registration.focal_position && (
+                                                                                                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                                                                                        {
+                                                                                                            asemme10Registration.focal_position
+                                                                                                        }
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+
+                                                                                            <div>
+                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                    Dietary
+                                                                                                    Requirements
+                                                                                                </div>
+                                                                                                <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                    {asemme10Registration.dietary_requirements ??
+                                                                                                        'None specified'}
+                                                                                                </div>
+                                                                                            </div>
+
+                                                                                            <div>
+                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                    Mobility
+                                                                                                    /
+                                                                                                    Special
+                                                                                                    Needs
+                                                                                                </div>
+                                                                                                <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                    {asemme10Registration.mobility_or_special_needs ??
+                                                                                                        'None specified'}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                                                                                            <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                Delegation
+                                                                                                Details
+                                                                                            </div>
+                                                                                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                                                                {ASEMME10_DELEGATION_DETAIL_FIELDS.map(
+                                                                                                    (
+                                                                                                        field,
+                                                                                                    ) => (
+                                                                                                        <div
+                                                                                                            key={
+                                                                                                                field.key
+                                                                                                            }
+                                                                                                        >
+                                                                                                            <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                                {
+                                                                                                                    field.label
+                                                                                                                }
+                                                                                                            </div>
+                                                                                                            <div className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">
+                                                                                                                {formatAsemme10RegistrationValue(
+                                                                                                                    asemme10DelegationDetails[
+                                                                                                                        field
+                                                                                                                            .key
+                                                                                                                    ],
+                                                                                                                )}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    ),
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                                                                                            <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                Consents
+                                                                                            </div>
+                                                                                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                                                                {ASEMME10_CONSENT_FIELDS.map(
+                                                                                                    (
+                                                                                                        field,
+                                                                                                    ) => (
+                                                                                                        <div
+                                                                                                            key={
+                                                                                                                field.key
+                                                                                                            }
+                                                                                                        >
+                                                                                                            <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                                {
+                                                                                                                    field.label
+                                                                                                                }
+                                                                                                            </div>
+                                                                                                            <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                                {formatAsemme10RegistrationValue(
+                                                                                                                    asemme10Consents[
+                                                                                                                        field
+                                                                                                                            .key
+                                                                                                                    ],
+                                                                                                                )}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    ),
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                )}
                                                                         </TableCell>
                                                                     </TableRow>
                                                                 )}
@@ -3579,11 +4708,16 @@ export default function ParticipantPage(props: PageProps) {
                                                 <Button
                                                     variant="outline"
                                                     size="sm"
-                                                    onClick={() =>
-                                                        setCurrentPage((p) =>
-                                                            Math.max(1, p - 1),
-                                                        )
-                                                    }
+                                                    onClick={() => {
+                                                        const page = Math.max(
+                                                            1,
+                                                            currentPage - 1,
+                                                        );
+                                                        setCurrentPage(page);
+                                                        visitParticipants({
+                                                            page,
+                                                        });
+                                                    }}
                                                     disabled={currentPage === 1}
                                                     className="h-8 px-3 text-xs"
                                                 >
@@ -3647,11 +4781,16 @@ export default function ParticipantPage(props: PageProps) {
                                                                             : 'outline'
                                                                     }
                                                                     size="sm"
-                                                                    onClick={() =>
+                                                                    onClick={() => {
                                                                         setCurrentPage(
                                                                             page,
-                                                                        )
-                                                                    }
+                                                                        );
+                                                                        visitParticipants(
+                                                                            {
+                                                                                page,
+                                                                            },
+                                                                        );
+                                                                    }}
                                                                     className={cn(
                                                                         'h-8 w-8 p-0 text-xs',
                                                                         currentPage ===
@@ -3668,14 +4807,16 @@ export default function ParticipantPage(props: PageProps) {
                                                 <Button
                                                     variant="outline"
                                                     size="sm"
-                                                    onClick={() =>
-                                                        setCurrentPage((p) =>
-                                                            Math.min(
-                                                                totalPages,
-                                                                p + 1,
-                                                            ),
-                                                        )
-                                                    }
+                                                    onClick={() => {
+                                                        const page = Math.min(
+                                                            totalPages,
+                                                            currentPage + 1,
+                                                        );
+                                                        setCurrentPage(page);
+                                                        visitParticipants({
+                                                            page,
+                                                        });
+                                                    }}
                                                     disabled={
                                                         currentPage ===
                                                         totalPages
@@ -4253,6 +5394,819 @@ export default function ParticipantPage(props: PageProps) {
                             Done
                         </Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={asemme10DelegationDialogOpen}
+                onOpenChange={setAsemme10DelegationDialogOpen}
+            >
+                <DialogContent className="max-h-[94vh] w-[min(1180px,calc(100vw-2rem))] !max-w-[1180px] overflow-hidden p-0">
+                    <div className="flex max-h-[94vh] flex-col">
+                        <DialogHeader className="shrink-0 border-b border-slate-200/70 px-5 py-5 pr-12 sm:px-8 dark:border-slate-800">
+                            <DialogTitle>
+                                Register an ASEMME10 Delegation
+                            </DialogTitle>
+                            <DialogDescription className="max-w-3xl text-sm leading-6">
+                                Enter the focal contact first, then add each
+                                participant who needs a virtual ID and QR code.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <form
+                            onSubmit={submitAsemme10Delegation}
+                            className="flex min-h-0 flex-1 flex-col"
+                        >
+                            <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto px-5 py-5 sm:px-8">
+                                <div className="grid gap-5 rounded-xl border border-slate-200 p-5 md:grid-cols-2 dark:border-slate-800">
+                            <div className="md:col-span-2">
+                                <div className="text-sm font-semibold">
+                                    1. Delegation and focal contact
+                                </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                    Select the delegation type and the person to
+                                    contact about this submission.
+                                </div>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    ASEMME10 Event
+                                </label>
+                                <Input
+                                    value={asemme10Programme?.title ?? ''}
+                                    disabled
+                                />
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Registration type
+                                </label>
+                                <SearchableCommandSelect
+                                    value={
+                                        asemme10DelegationForm.data
+                                            .registration_type
+                                    }
+                                    options={
+                                        ASEMME10_REGISTRATION_TYPE_OPTIONS
+                                    }
+                                    placeholder="Select registration type"
+                                    searchPlaceholder="Search registration type..."
+                                    emptyText="No registration type found."
+                                    onValueChange={(value) =>
+                                        setAsemme10RegistrationType(
+                                            value,
+                                        )
+                                    }
+                                />
+                            </div>
+
+                            {asemme10DelegationForm.data.registration_type ===
+                            'Other' ? (
+                                <div className="grid gap-1.5 md:col-span-2">
+                                    <label className="text-sm font-medium">
+                                        Specify registration type
+                                        <span className="text-[11px] font-semibold text-red-600">
+                                            {' '}
+                                            *
+                                        </span>
+                                    </label>
+                                    <Input
+                                        placeholder="Enter the delegation type"
+                                        value={
+                                            asemme10DelegationForm.data
+                                                .delegation
+                                                .registration_type_other
+                                        }
+                                        onChange={(event) =>
+                                            updateAsemme10Delegation(
+                                                'registration_type_other',
+                                                event.target.value,
+                                            )
+                                        }
+                                    />
+                                    {asemme10DelegationError(
+                                        'delegation.registration_type_other',
+                                    ) ? (
+                                        <div className="text-xs text-red-600">
+                                            {asemme10DelegationError(
+                                                'delegation.registration_type_other',
+                                            )}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Country
+                                </label>
+                                <SearchableCommandSelect
+                                    value={
+                                        asemme10DelegationForm.data.country_id
+                                    }
+                                    options={asemme10CountryOptions}
+                                    placeholder="Select country"
+                                    searchPlaceholder="Search country..."
+                                    emptyText="No country found."
+                                    onValueChange={(value) =>
+                                        asemme10DelegationForm.setData(
+                                            'country_id',
+                                            value,
+                                        )
+                                    }
+                                />
+                                {asemme10DelegationError('country_id') ? (
+                                    <div className="text-xs text-red-600">
+                                        {asemme10DelegationError('country_id')}
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Focal name
+                                    <span className="text-[11px] font-semibold text-red-600">
+                                        {' '}
+                                        *
+                                    </span>
+                                </label>
+                                <Input
+                                    placeholder="Full name"
+                                    value={
+                                        asemme10DelegationForm.data.focal.name
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Focal(
+                                            'name',
+                                            event.target.value,
+                                        )
+                                    }
+                                />
+                                {(asemme10DelegationForm.errors as Record<string, string>)[
+                                    'focal.name'
+                                ] ? (
+                                    <div className="text-xs text-red-600">
+                                        {
+                                            (
+                                                asemme10DelegationForm.errors as Record<
+                                                    string,
+                                                    string
+                                                >
+                                            )['focal.name']
+                                        }
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Focal email
+                                    <span className="text-[11px] font-semibold text-red-600">
+                                        {' '}
+                                        *
+                                    </span>
+                                </label>
+                                <Input
+                                    type="email"
+                                    placeholder="focal@example.com"
+                                    value={
+                                        asemme10DelegationForm.data.focal.email
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Focal(
+                                            'email',
+                                            event.target.value,
+                                        )
+                                    }
+                                />
+                                {asemme10DelegationError('focal.email') ? (
+                                    <div className="text-xs text-red-600">
+                                        {asemme10DelegationError('focal.email')}
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Focal phone
+                                </label>
+                                <Input
+                                    placeholder="Phone number"
+                                    value={
+                                        asemme10DelegationForm.data.focal.phone
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Focal(
+                                            'phone',
+                                            event.target.value,
+                                        )
+                                    }
+                                />
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Focal organization
+                                </label>
+                                <Input
+                                    placeholder="Ministry, agency, or organization"
+                                    value={
+                                        asemme10DelegationForm.data.focal
+                                            .organization
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Focal(
+                                            'organization',
+                                            event.target.value,
+                                        )
+                                    }
+                                />
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Focal position
+                                </label>
+                                <Input
+                                    placeholder="Position / designation"
+                                    value={
+                                        asemme10DelegationForm.data.focal
+                                            .position
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Focal(
+                                            'position',
+                                            event.target.value,
+                                        )
+                                    }
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                            <div>
+                                <div className="text-sm font-semibold">
+                                    2. Required consent
+                                </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                    Confirm these items before saving the
+                                    delegation.
+                                </div>
+                            </div>
+                            {[
+                                [
+                                    'data_collection',
+                                    'I confirm that I have read and understood the data collection notice.',
+                                ],
+                                [
+                                    'data_storage',
+                                    'I consent to the submitted data being collected and stored only for organising this Ministerial Meeting.',
+                                ],
+                                [
+                                    'photo_video',
+                                    'I consent to photo, video, and meeting recording use for event documentation.',
+                                ],
+                            ].map(([key, label]) => (
+                                <label
+                                    key={key}
+                                    className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800"
+                                >
+                                    <Checkbox
+                                        checked={
+                                            asemme10DelegationForm.data
+                                                .consents[
+                                                key as keyof typeof asemme10DelegationForm.data.consents
+                                            ]
+                                        }
+                                        onCheckedChange={(checked) =>
+                                            asemme10DelegationForm.setData(
+                                                'consents',
+                                                {
+                                                    ...asemme10DelegationForm
+                                                        .data.consents,
+                                                    [key]: Boolean(checked),
+                                                },
+                                            )
+                                        }
+                                    />
+                                    <span>{label}</span>
+                                </label>
+                            ))}
+                            {asemme10DelegationError(
+                                'consents.data_collection',
+                            ) ||
+                            asemme10DelegationError('consents.data_storage') ||
+                            asemme10DelegationError('consents.photo_video') ? (
+                                <div className="text-xs text-red-600">
+                                    Please confirm all required consent items.
+                                </div>
+                            ) : null}
+                        </div>
+
+                        <div className="grid gap-4 rounded-xl border border-slate-200 p-4 sm:grid-cols-2 dark:border-slate-800">
+                            <div className="sm:col-span-2">
+                                <div className="text-sm font-semibold">
+                                    3. Delegation notes
+                                </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                    Add reception, dinner, meeting, or general
+                                    notes if needed.
+                                </div>
+                            </div>
+                            <div className="grid gap-1.5 sm:col-span-2">
+                                <label className="text-sm font-medium">
+                                    Social activities
+                                </label>
+                                <div className="grid gap-2 sm:grid-cols-3">
+                                    {ASEMME10_SOCIAL_ACTIVITIES.map(
+                                        (activity) => (
+                                            <label
+                                                key={activity}
+                                                className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800"
+                                            >
+                                                <Checkbox
+                                                    checked={asemme10DelegationForm.data.delegation.social_activities.includes(
+                                                        activity,
+                                                    )}
+                                                    onCheckedChange={(
+                                                        checked,
+                                                    ) =>
+                                                        toggleAsemme10SocialActivity(
+                                                            activity,
+                                                            Boolean(checked),
+                                                        )
+                                                    }
+                                                />
+                                                <span>{activity}</span>
+                                            </label>
+                                        ),
+                                    )}
+                                </div>
+                                {asemme10DelegationForm.data.delegation.social_activities.includes(
+                                    'Other',
+                                ) ? (
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Specify other social activity
+                                            <span className="text-[11px] font-semibold text-red-600">
+                                                {' '}
+                                                *
+                                            </span>
+                                        </label>
+                                        <Input
+                                            placeholder="Enter the activity"
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .delegation
+                                                    .social_activity_other
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Delegation(
+                                                    'social_activity_other',
+                                                    event.target.value,
+                                                )
+                                            }
+                                        />
+                                        {asemme10DelegationError(
+                                            'delegation.social_activity_other',
+                                        ) ? (
+                                            <div className="text-xs text-red-600">
+                                                {asemme10DelegationError(
+                                                    'delegation.social_activity_other',
+                                                )}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Bilateral meeting interest
+                                </label>
+                                <SearchableCommandSelect
+                                    value={
+                                        asemme10DelegationForm.data.delegation
+                                            .bilateral_meeting_interest
+                                    }
+                                    options={ASEMME10_BILATERAL_MEETING_OPTIONS}
+                                    placeholder="Select interest"
+                                    searchPlaceholder="Search meeting interest..."
+                                    emptyText="No option found."
+                                    onValueChange={(value) =>
+                                        updateAsemme10Delegation(
+                                            'bilateral_meeting_interest',
+                                            value,
+                                        )
+                                    }
+                                />
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Bilateral contact emails
+                                </label>
+                                <Input
+                                    placeholder="email@example.com, another@example.com"
+                                    value={
+                                        asemme10DelegationForm.data.delegation
+                                            .bilateral_contact_emails
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Delegation(
+                                            'bilateral_contact_emails',
+                                            event.target.value,
+                                        )
+                                    }
+                                />
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Social activity details
+                                </label>
+                                <textarea
+                                    value={
+                                        asemme10DelegationForm.data.delegation
+                                            .social_activity_details
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Delegation(
+                                            'social_activity_details',
+                                            event.target.value,
+                                        )
+                                    }
+                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                />
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <label className="text-sm font-medium">
+                                    Bilateral meeting comments
+                                </label>
+                                <textarea
+                                    value={
+                                        asemme10DelegationForm.data.delegation
+                                            .bilateral_comments
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Delegation(
+                                            'bilateral_comments',
+                                            event.target.value,
+                                        )
+                                    }
+                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                />
+                            </div>
+
+                            <div className="grid gap-1.5 sm:col-span-2">
+                                <label className="text-sm font-medium">
+                                    Additional comments
+                                </label>
+                                <textarea
+                                    value={
+                                        asemme10DelegationForm.data.delegation
+                                            .additional_comments
+                                    }
+                                    onChange={(event) =>
+                                        updateAsemme10Delegation(
+                                            'additional_comments',
+                                            event.target.value,
+                                        )
+                                    }
+                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid gap-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                    <div className="text-sm font-semibold">
+                                        4. Participants to create
+                                    </div>
+                                    <div className="max-w-2xl text-xs text-slate-500 dark:text-slate-400">
+                                        Add one row for every person who needs a
+                                        QR code. Use each attendee's own email
+                                        when available; leave it blank if the
+                                        focal will manage the ID.
+                                    </div>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={addAsemme10Attendee}
+                                >
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Add participant
+                                </Button>
+                            </div>
+                            {asemme10DelegationError('attendees') ? (
+                                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                                    {asemme10DelegationError('attendees')}
+                                </div>
+                            ) : null}
+
+                            {asemme10DelegationForm.data.attendees.map(
+                                (attendee, index) => (
+                                    <div
+                                        key={`${attendee.role}-${index}`}
+                                        className="grid gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <Badge variant="secondary">
+                                                Participant {index + 1}:{' '}
+                                                {asemme10RoleLabel(attendee.role)}
+                                            </Badge>
+                                            {asemme10DelegationForm.data
+                                                .attendees.length > 1 &&
+                                            attendee.role !== 'head' ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() =>
+                                                        removeAsemme10Attendee(
+                                                            index,
+                                                        )
+                                                    }
+                                                >
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    Remove
+                                                </Button>
+                                            ) : null}
+                                        </div>
+
+                                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                            <div className="grid gap-1.5">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Title
+                                                </label>
+                                                <SearchableCommandSelect
+                                                    value={attendee.title}
+                                                    options={
+                                                        ASEMME10_TITLE_SELECT_OPTIONS
+                                                    }
+                                                    placeholder="Select title"
+                                                    searchPlaceholder="Search title..."
+                                                    emptyText="No title found."
+                                                    onValueChange={(value) =>
+                                                        setAsemme10AttendeeTitle(
+                                                            index,
+                                                            value,
+                                                        )
+                                                    }
+                                                />
+                                                {attendee.title === 'Other' ? (
+                                                    <div className="grid gap-1.5">
+                                                        <Input
+                                                            placeholder="Specify title"
+                                                            value={
+                                                                attendee.title_other
+                                                            }
+                                                            onChange={(event) =>
+                                                                updateAsemme10Attendee(
+                                                                    index,
+                                                                    'title_other',
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                        />
+                                                        {asemme10AttendeeError(
+                                                            index,
+                                                            'title_other',
+                                                        ) ? (
+                                                            <div className="text-xs text-red-600">
+                                                                {asemme10AttendeeError(
+                                                                    index,
+                                                                    'title_other',
+                                                                )}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            <div className="grid gap-1.5">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Given name
+                                                    <span className="text-red-600">
+                                                        {' '}
+                                                        *
+                                                    </span>
+                                                </label>
+                                                <Input
+                                                    placeholder="First / given name"
+                                                    value={attendee.given_name}
+                                                    onChange={(event) =>
+                                                        updateAsemme10Attendee(
+                                                            index,
+                                                            'given_name',
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                />
+                                                {asemme10AttendeeError(
+                                                    index,
+                                                    'given_name',
+                                                ) ? (
+                                                    <div className="text-xs text-red-600">
+                                                        {asemme10AttendeeError(
+                                                            index,
+                                                            'given_name',
+                                                        )}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            <div className="grid gap-1.5">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Family name
+                                                    <span className="text-red-600">
+                                                        {' '}
+                                                        *
+                                                    </span>
+                                                </label>
+                                                <Input
+                                                    placeholder="Last / family name"
+                                                    value={attendee.family_name}
+                                                    onChange={(event) =>
+                                                        updateAsemme10Attendee(
+                                                            index,
+                                                            'family_name',
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                />
+                                                {asemme10AttendeeError(
+                                                    index,
+                                                    'family_name',
+                                                ) ? (
+                                                    <div className="text-xs text-red-600">
+                                                        {asemme10AttendeeError(
+                                                            index,
+                                                            'family_name',
+                                                        )}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            <div className="grid gap-1.5">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Badge name
+                                                </label>
+                                                <Input
+                                                    placeholder="Name to print on ID"
+                                                    value={attendee.badge_name}
+                                                    onChange={(event) =>
+                                                        updateAsemme10Attendee(
+                                                            index,
+                                                            'badge_name',
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+                                            <div className="grid gap-1.5">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Organization / ministry
+                                                </label>
+                                                <Input
+                                                    placeholder="Ministry, agency, or organization"
+                                                    value={
+                                                        attendee.organization_name
+                                                    }
+                                                    onChange={(event) =>
+                                                        updateAsemme10Attendee(
+                                                            index,
+                                                            'organization_name',
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+                                            <div className="grid gap-1.5">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Position / job title
+                                                </label>
+                                                <Input
+                                                    placeholder="Official position"
+                                                    value={
+                                                        attendee.position_title
+                                                    }
+                                                    onChange={(event) =>
+                                                        updateAsemme10Attendee(
+                                                            index,
+                                                            'position_title',
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+                                            <div className="grid gap-1.5 sm:col-span-2">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Participant email
+                                                </label>
+                                                <Input
+                                                    type="email"
+                                                    placeholder="Use participant email if available"
+                                                    value={attendee.email}
+                                                    onChange={(event) =>
+                                                        updateAsemme10Attendee(
+                                                            index,
+                                                            'email',
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                />
+                                                {asemme10AttendeeError(
+                                                    index,
+                                                    'email',
+                                                ) ? (
+                                                    <div className="text-xs text-red-600">
+                                                        {asemme10AttendeeError(
+                                                            index,
+                                                            'email',
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                        Leave blank when the
+                                                        focal person will
+                                                        receive/manage the ID.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="grid gap-3 sm:grid-cols-2">
+                                            <div className="grid gap-1.5">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Dietary requirements
+                                                </label>
+                                                <textarea
+                                                    placeholder="Food restrictions, allergies, or halal/vegetarian needs"
+                                                    value={
+                                                        attendee.dietary_requirements
+                                                    }
+                                                    onChange={(event) =>
+                                                        updateAsemme10Attendee(
+                                                            index,
+                                                            'dietary_requirements',
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                                />
+                                            </div>
+                                            <div className="grid gap-1.5">
+                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Mobility or special needs
+                                                </label>
+                                                <textarea
+                                                    placeholder="Accessibility, mobility, or other assistance needed"
+                                                    value={
+                                                        attendee.mobility_or_special_needs
+                                                    }
+                                                    onChange={(event) =>
+                                                        updateAsemme10Attendee(
+                                                            index,
+                                                            'mobility_or_special_needs',
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                ),
+                            )}
+                        </div>
+
+                            </div>
+
+                            <DialogFooter className="shrink-0 gap-2 border-t border-slate-200/70 px-5 py-4 sm:px-8 dark:border-slate-800">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() =>
+                                    setAsemme10DelegationDialogOpen(false)
+                                }
+                                disabled={asemme10DelegationForm.processing}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                className={PRIMARY_BTN}
+                                disabled={asemme10DelegationForm.processing}
+                            >
+                                Save Delegation Participants
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                    </div>
                 </DialogContent>
             </Dialog>
 
@@ -5690,6 +7644,85 @@ export default function ParticipantPage(props: PageProps) {
                                                     }
                                                     placeholder="Email address"
                                                 />
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-xl border border-slate-200 px-3 py-3 sm:col-span-2 dark:border-slate-800">
+                                            <div className="grid gap-3 sm:grid-cols-2">
+                                                <div className="space-y-1.5 sm:col-span-2">
+                                                    <div className="text-sm font-medium">
+                                                        Event registration
+                                                        fields
+                                                    </div>
+                                                    <select
+                                                        value={
+                                                            participantForm.data
+                                                                .programme_id
+                                                        }
+                                                        onChange={(event) => {
+                                                            const programmeId =
+                                                                event.target
+                                                                    .value;
+                                                            participantForm.setData(
+                                                                'programme_id',
+                                                                programmeId,
+                                                            );
+                                                            participantForm.setData(
+                                                                'registration_responses',
+                                                                responsesForProgramme(
+                                                                    editingParticipant,
+                                                                    programmeId,
+                                                                ),
+                                                            );
+                                                        }}
+                                                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:ring-2 focus-visible:ring-[#00359c]/30 focus-visible:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                                                    >
+                                                        <option value="">
+                                                            Select event
+                                                        </option>
+                                                        {normalizedProgrammes.map(
+                                                            (programme) => (
+                                                                <option
+                                                                    key={
+                                                                        programme.id
+                                                                    }
+                                                                    value={String(
+                                                                        programme.id,
+                                                                    )}
+                                                                >
+                                                                    {
+                                                                        programme.title
+                                                                    }
+                                                                </option>
+                                                            ),
+                                                        )}
+                                                    </select>
+                                                    {participantForm.errors
+                                                        .programme_id ? (
+                                                        <div className="text-xs text-red-600">
+                                                            {
+                                                                participantForm
+                                                                    .errors
+                                                                    .programme_id
+                                                            }
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+
+                                                {participantForm.data
+                                                    .programme_id &&
+                                                selectedRegistrationFields.length ===
+                                                    0 ? (
+                                                    <div className="rounded-xl border border-dashed border-slate-200 px-3 py-3 text-sm text-slate-500 sm:col-span-2 dark:border-slate-800 dark:text-slate-400">
+                                                        This event does not have
+                                                        custom registration
+                                                        fields.
+                                                    </div>
+                                                ) : null}
+
+                                                {selectedRegistrationFields.map(
+                                                    renderRegistrationField,
+                                                )}
                                             </div>
                                         </div>
 

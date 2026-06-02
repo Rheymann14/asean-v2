@@ -3,13 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\Country;
+use App\Models\EventRegistrationAttendee;
 use App\Models\Feedback;
 use App\Models\ParticipantAttendance;
 use App\Models\Programme;
 use App\Models\User;
 use App\Models\UserType;
+use App\Support\EventDefaults;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class DashboardController extends Controller
@@ -120,12 +123,32 @@ class DashboardController extends Controller
             ->get()
             ->groupBy('programme_id');
 
-        $events = Programme::query()
-            ->orderBy('starts_at')
+        $eventRegistrationRows = EventRegistrationAttendee::query()
+            ->leftJoin('event_registration_submissions', 'event_registration_attendees.submission_id', '=', 'event_registration_submissions.id')
+            ->leftJoin('users', 'event_registration_attendees.user_id', '=', 'users.id')
+            ->select(
+                'event_registration_attendees.programme_id',
+                DB::raw('COALESCE(event_registration_submissions.country_id, users.country_id) as country_id'),
+                DB::raw('count(*) as total')
+            )
+            ->groupBy(
+                'event_registration_attendees.programme_id',
+                DB::raw('COALESCE(event_registration_submissions.country_id, users.country_id)')
+            )
             ->get()
-            ->map(function (Programme $programme) use ($attendances, $joinedRows) {
+            ->groupBy('programme_id');
+
+        $programmeEvents = Programme::query()
+            ->orderBy('starts_at')
+            ->get();
+        $defaultEventId = EventDefaults::defaultEventId($programmeEvents);
+
+        $events = $programmeEvents
+            ->map(function (Programme $programme) use ($attendances, $joinedRows, $eventRegistrationRows) {
                 $records = $attendances->get($programme->id, collect());
-                $joinedForProgramme = $joinedRows->get($programme->id, collect());
+                $joinedForProgramme = $this->isAsemme10Programme($programme)
+                    ? $eventRegistrationRows->get($programme->id, collect())
+                    : $joinedRows->get($programme->id, collect());
                 $joinedByCountry = $joinedForProgramme
                     ->filter(fn ($row) => $row->country_id !== null)
                     ->mapWithKeys(fn ($row) => [
@@ -139,6 +162,7 @@ class DashboardController extends Controller
                     'title' => $programme->title,
                     'starts_at' => $programme->starts_at?->toISOString(),
                     'ends_at' => $programme->ends_at?->toISOString(),
+                    'is_registration_active' => $programme->is_registration_active,
                     'attendance_count' => $records->count(),
                     'joined_count' => $joinedTotal,
                     'joined_by_country' => $joinedByCountry,
@@ -163,6 +187,9 @@ class DashboardController extends Controller
             ->values();
 
         $year = now()->year;
+        $monthExpression = DB::connection()->getDriverName() === 'sqlite'
+            ? "CAST(strftime('%m', participant_attendances.scanned_at) AS INTEGER)"
+            : 'MONTH(participant_attendances.scanned_at)';
 
         $monthlyTotals = ParticipantAttendance::query()
             ->join('users', 'participant_attendances.user_id', '=', 'users.id')
@@ -171,7 +198,7 @@ class DashboardController extends Controller
             ->tap(function ($query) use ($excludeAdmin) {
                 $excludeAdmin($query);
             })
-            ->selectRaw('MONTH(scanned_at) as month, COUNT(*) as total')
+            ->selectRaw("{$monthExpression} as month, COUNT(*) as total")
             ->groupBy('month')
             ->pluck('total', 'month');
 
@@ -183,7 +210,7 @@ class DashboardController extends Controller
             ->tap(function ($query) use ($excludeAdmin) {
                 $excludeAdmin($query);
             })
-            ->selectRaw('MONTH(participant_attendances.scanned_at) as month, users.country_id as country_id, COUNT(*) as total')
+            ->selectRaw("{$monthExpression} as month, users.country_id as country_id, COUNT(*) as total")
             ->groupBy('month', 'country_id')
             ->get()
             ->groupBy('month');
@@ -258,6 +285,7 @@ class DashboardController extends Controller
             ],
             'country_stats' => $countryStats,
             'events' => $events,
+            'default_event_id' => $defaultEventId ?: null,
             'line_data' => $lineData,
             'feedback' => [
                 'total' => (int) ($feedbackStats->total ?? 0),
@@ -266,6 +294,18 @@ class DashboardController extends Controller
                 'by_event' => $feedbackByEvent,
                 'entries_by_event' => $feedbackEntriesByEvent,
             ],
+        ]);
+    }
+
+    private function isAsemme10Programme(Programme $programme): bool
+    {
+        $value = Str::lower(trim(($programme->tag ?? '').' '.$programme->title));
+
+        return Str::contains($value, [
+            'asemme10',
+            'asemme 10',
+            'asia-europe meeting of ministers for education',
+            '10th asia-europe meeting',
         ]);
     }
 }

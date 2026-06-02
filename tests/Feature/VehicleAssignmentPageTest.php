@@ -94,7 +94,7 @@ test('admin sees all joined event participants in vehicle assignment list', func
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('vehicle-assignment')
-            ->where('participants', fn (array $participants) => count($participants) === 2)
+            ->where('participants', fn ($participants) => count($participants) === 2)
         );
 });
 
@@ -157,6 +157,69 @@ test('admin vehicle assignment defaults to active event participants when no eve
         ->assertInertia(fn (Assert $page) => $page
             ->component('vehicle-assignment')
             ->where('selected_event_id', $activeProgramme->id)
-            ->where('participants', fn (array $participants) => count($participants) === 75)
+            ->where('participants', fn ($participants) => count($participants) === 75)
+        );
+});
+
+test('admin vehicle assignment defaults to active registration event when available', function () {
+    $adminType = UserType::query()->create([
+        'name' => 'ADMIN',
+        'slug' => 'ADMIN',
+        'is_active' => true,
+    ]);
+
+    $participantType = UserType::query()->create([
+        'name' => 'PARTICIPANT',
+        'slug' => 'PARTICIPANT',
+        'is_active' => true,
+    ]);
+
+    $owner = User::factory()->create();
+
+    $activeProgramme = Programme::query()->create([
+        'user_id' => $owner->id,
+        'tag' => 'EVT-ACTIVE',
+        'title' => 'Active Event',
+        'description' => 'Programme description',
+        'location' => 'Manila',
+        'starts_at' => now()->addDay(),
+        'ends_at' => now()->addDay()->addHour(),
+        'is_active' => true,
+    ]);
+
+    $registrationProgramme = Programme::query()->create([
+        'user_id' => $owner->id,
+        'tag' => 'EVT-REG',
+        'title' => 'Registration Event',
+        'description' => 'Programme description',
+        'location' => 'Manila',
+        'starts_at' => now()->addDays(2),
+        'ends_at' => now()->addDays(2)->addHour(),
+        'is_active' => true,
+        'is_registration_active' => true,
+    ]);
+
+    $admin = User::factory()->create([
+        'user_type_id' => $adminType->id,
+    ]);
+
+    $activeParticipants = User::factory()->count(3)->create([
+        'user_type_id' => $participantType->id,
+    ]);
+
+    $registrationParticipants = User::factory()->count(5)->create([
+        'user_type_id' => $participantType->id,
+    ]);
+
+    $activeProgramme->users()->attach($activeParticipants->pluck('id'));
+    $registrationProgramme->users()->attach($registrationParticipants->pluck('id'));
+
+    $this->actingAs($admin)
+        ->get(route('vehicle-assignment'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('vehicle-assignment')
+            ->where('selected_event_id', $registrationProgramme->id)
+            ->where('participants', fn ($participants) => count($participants) === 5)
         );
 });

@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\UserType;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -32,6 +33,11 @@ class UserFactory extends Factory
             'two_factor_secret' => Str::random(10),
             'two_factor_recovery_codes' => Str::random(10),
             'two_factor_confirmed_at' => now(),
+            'is_active' => true,
+            'user_type_id' => UserType::query()->firstOrCreate(
+                ['slug' => 'admin'],
+                ['name' => 'Admin', 'is_active' => true, 'sequence_order' => 0],
+            )->id,
         ];
     }
 

@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Programme;
 use App\Models\ParticipantAttendance;
+use App\Models\Programme;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -21,15 +21,15 @@ class ProgrammeController extends Controller
         $programmes = Programme::query()
             ->with([
                 'user',
-                'participants',
                 'materials',
+                'registrationFields',
                 'venues' => fn ($query) => $query->orderBy('id'),
             ])
+            ->withCount('participants')
             ->latest('starts_at')
             ->get()
             ->map(function (Programme $programme) use ($attendanceByProgramme) {
                 $attendanceEntries = $attendanceByProgramme->get($programme->id, collect());
-                $attendanceByUser = $attendanceEntries->keyBy('user_id');
                 $venue = $programme->venues->first();
 
                 return [
@@ -61,30 +61,20 @@ class ProgrammeController extends Controller
                         ])
                         ->values()
                         ->all(),
+                    'registration_fields' => $this->registrationFieldsPayload($programme),
                     'signatory_name' => $programme->signatory_name,
                     'signatory_title' => $programme->signatory_title,
                     'signatory_signature_url' => $programme->signatory_signature_url,
                     'is_active' => $programme->is_active,
+                    'is_registration_active' => $programme->is_registration_active,
                     'updated_at' => $programme->updated_at?->toISOString(),
                     'created_by' => $programme->user
                         ? [
                             'name' => $programme->user->name,
                         ]
                         : null,
-                    'participants' => $programme->participants
-                        ->map(function ($participant) use ($attendanceByUser) {
-                            $attendance = $attendanceByUser->get($participant->id);
-
-                            return [
-                                'id' => $participant->id,
-                                'name' => $participant->name,
-                                'email' => $participant->email,
-                                'display_id' => $participant->display_id,
-                                'checked_in_at' => $attendance?->scanned_at?->toISOString(),
-                            ];
-                        })
-                        ->values()
-                        ->all(),
+                    'participant_count' => $programme->participants_count,
+                    'checked_in_count' => $attendanceEntries->count(),
                 ];
             });
 
@@ -109,6 +99,7 @@ class ProgrammeController extends Controller
                 'image_url' => $programme->image_url,
                 'pdf_url' => $programme->pdf_url,
                 'is_active' => $programme->is_active,
+                'is_registration_active' => $programme->is_registration_active,
                 'updated_at' => $programme->updated_at?->toISOString(),
             ]);
 
@@ -239,7 +230,7 @@ class ProgrammeController extends Controller
         $startsAt = $programme->starts_at;
         $endsAt = $programme->ends_at;
 
-        if (!$programme->is_active) {
+        if (! $programme->is_active) {
             return back()->withErrors(['event' => 'This event is closed.']);
         }
 
@@ -247,7 +238,7 @@ class ProgrammeController extends Controller
             return back()->withErrors(['event' => 'This event is closed.']);
         }
 
-        if (!$endsAt && $startsAt && $now->greaterThan($startsAt) && !$now->isSameDay($startsAt)) {
+        if (! $endsAt && $startsAt && $now->greaterThan($startsAt) && ! $now->isSameDay($startsAt)) {
             return back()->withErrors(['event' => 'This event is closed.']);
         }
 
@@ -283,8 +274,8 @@ class ProgrammeController extends Controller
             'pdf' => ['nullable', 'file', 'mimes:pdf', 'max:20480'],
             'materials' => ['nullable', 'array'],
             'materials.*' => ['file', 'mimes:pdf,doc,docx,xls,xlsx,ppt,pptx', 'max:20480'],
-               'materials_remove' => ['nullable', 'array'],
-    'materials_remove.*' => ['integer'],
+            'materials_remove' => ['nullable', 'array'],
+            'materials_remove.*' => ['integer'],
             'signatory_name' => ['nullable', 'string', 'max:255'],
             'signatory_title' => ['nullable', 'string', 'max:255'],
             'signatory_signature' => ['nullable', 'image', 'max:10240'],
@@ -294,10 +285,10 @@ class ProgrammeController extends Controller
         $imageName = null;
         if ($request->hasFile('image')) {
             $file = $request->file('image');
-            $imageName = Str::uuid()->toString() . '.' . $file->getClientOriginalExtension();
+            $imageName = Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
             $destination = public_path('event-images');
 
-            if (!File::exists($destination)) {
+            if (! File::exists($destination)) {
                 File::makeDirectory($destination, 0755, true);
             }
 
@@ -309,7 +300,7 @@ class ProgrammeController extends Controller
             $file = $request->file('pdf');
             $destination = public_path('downloadables');
 
-            if (!File::exists($destination)) {
+            if (! File::exists($destination)) {
                 File::makeDirectory($destination, 0755, true);
             }
 
@@ -320,10 +311,10 @@ class ProgrammeController extends Controller
         $signatureName = null;
         if ($request->hasFile('signatory_signature')) {
             $file = $request->file('signatory_signature');
-            $signatureName = Str::uuid()->toString() . '.' . $file->getClientOriginalExtension();
+            $signatureName = Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
             $destination = public_path('signatures');
 
-            if (!File::exists($destination)) {
+            if (! File::exists($destination)) {
                 File::makeDirectory($destination, 0755, true);
             }
 
@@ -371,19 +362,23 @@ class ProgrammeController extends Controller
             'is_active' => ['sometimes', 'boolean'],
         ]);
 
+        if (array_key_exists('is_active', $validated) && ! $validated['is_active']) {
+            $validated['is_registration_active'] = false;
+        }
+
         if ($request->hasFile('image')) {
             $file = $request->file('image');
-            $imageName = Str::uuid()->toString() . '.' . $file->getClientOriginalExtension();
+            $imageName = Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
             $destination = public_path('event-images');
 
-            if (!File::exists($destination)) {
+            if (! File::exists($destination)) {
                 File::makeDirectory($destination, 0755, true);
             }
 
             $file->move($destination, $imageName);
 
             if ($programme->image_url) {
-                $existing = public_path('event-images/' . ltrim($programme->image_url, '/'));
+                $existing = public_path('event-images/'.ltrim($programme->image_url, '/'));
                 if (File::exists($existing)) {
                     File::delete($existing);
                 }
@@ -396,7 +391,7 @@ class ProgrammeController extends Controller
             $file = $request->file('pdf');
             $destination = public_path('downloadables');
 
-            if (!File::exists($destination)) {
+            if (! File::exists($destination)) {
                 File::makeDirectory($destination, 0755, true);
             }
 
@@ -404,7 +399,7 @@ class ProgrammeController extends Controller
             $file->move($destination, $pdfName);
 
             if ($programme->pdf_url) {
-                $existing = public_path('downloadables/' . ltrim($programme->pdf_url, '/'));
+                $existing = public_path('downloadables/'.ltrim($programme->pdf_url, '/'));
                 if (File::exists($existing)) {
                     File::delete($existing);
                 }
@@ -415,7 +410,7 @@ class ProgrammeController extends Controller
 
         if ($request->boolean('signatory_signature_remove')) {
             if ($programme->signatory_signature_url) {
-                $existing = public_path('signatures/' . ltrim($programme->signatory_signature_url, '/'));
+                $existing = public_path('signatures/'.ltrim($programme->signatory_signature_url, '/'));
                 if (File::exists($existing)) {
                     File::delete($existing);
                 }
@@ -425,17 +420,17 @@ class ProgrammeController extends Controller
 
         if ($request->hasFile('signatory_signature')) {
             $file = $request->file('signatory_signature');
-            $signatureName = Str::uuid()->toString() . '.' . $file->getClientOriginalExtension();
+            $signatureName = Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
             $destination = public_path('signatures');
 
-            if (!File::exists($destination)) {
+            if (! File::exists($destination)) {
                 File::makeDirectory($destination, 0755, true);
             }
 
             $file->move($destination, $signatureName);
 
             if ($programme->signatory_signature_url) {
-                $existing = public_path('signatures/' . ltrim($programme->signatory_signature_url, '/'));
+                $existing = public_path('signatures/'.ltrim($programme->signatory_signature_url, '/'));
                 if (File::exists($existing)) {
                     File::delete($existing);
                 }
@@ -447,38 +442,114 @@ class ProgrammeController extends Controller
         $programme->update($validated);
 
         // ✅ remove selected existing materials (delete file + db row)
-$removeIds = $request->input('materials_remove', []);
-if (is_array($removeIds) && count($removeIds)) {
-    $removeIds = collect($removeIds)->filter()->unique()->values();
+        $removeIds = $request->input('materials_remove', []);
+        if (is_array($removeIds) && count($removeIds)) {
+            $removeIds = collect($removeIds)->filter()->unique()->values();
 
-    $materialsToRemove = $programme->materials()
-        ->whereIn('id', $removeIds)
-        ->get();
+            $materialsToRemove = $programme->materials()
+                ->whereIn('id', $removeIds)
+                ->get();
 
-    foreach ($materialsToRemove as $material) {
-        $existing = public_path('event-materials/' . ltrim($material->file_path, '/'));
-        if (File::exists($existing)) {
-            File::delete($existing);
+            foreach ($materialsToRemove as $material) {
+                $existing = public_path('event-materials/'.ltrim($material->file_path, '/'));
+                if (File::exists($existing)) {
+                    File::delete($existing);
+                }
+                $material->delete();
+            }
         }
-        $material->delete();
-    }
-}
-
 
         $this->storeMaterials($request, $programme);
 
         return back();
     }
 
+    public function updateRegistrationFields(Request $request, Programme $programme)
+    {
+        $validated = $request->validate([
+            'registration_fields' => ['nullable', 'array'],
+            'registration_fields.*.id' => ['nullable', 'integer', 'exists:registration_fields,id'],
+            'registration_fields.*.label' => ['required', 'string', 'max:500'],
+            'registration_fields.*.field_key' => ['nullable', 'string', 'max:100'],
+            'registration_fields.*.field_type' => ['required', 'string', 'in:section,text,textarea,email,tel,date,radio,checkbox,select'],
+            'registration_fields.*.options' => ['nullable', 'array'],
+            'registration_fields.*.options.*' => ['nullable', 'string', 'max:255'],
+            'registration_fields.*.placeholder' => ['nullable', 'string', 'max:255'],
+            'registration_fields.*.help_text' => ['nullable', 'string', 'max:1000'],
+            'registration_fields.*.is_required' => ['nullable', 'boolean'],
+            'registration_fields.*.sort_order' => ['nullable', 'integer', 'min:0'],
+        ]);
+
+        $fields = collect($validated['registration_fields'] ?? [])->values();
+        $keptIds = $fields->pluck('id')->filter()->map(fn ($id) => (int) $id)->values();
+
+        $programme->registrationFields()
+            ->when($keptIds->isNotEmpty(), fn ($query) => $query->whereNotIn('id', $keptIds))
+            ->delete();
+
+        $usedKeys = [];
+        foreach ($fields as $index => $field) {
+            $type = $field['field_type'];
+            $options = in_array($type, ['radio', 'checkbox', 'select'], true)
+                ? collect($field['options'] ?? [])
+                    ->map(fn ($option) => trim((string) $option))
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all()
+                : [];
+
+            $baseKey = trim((string) ($field['field_key'] ?? ''));
+            $key = $this->uniqueFieldKey($baseKey ?: (string) $field['label'], $usedKeys);
+            $usedKeys[] = $key;
+
+            $payload = [
+                'field_key' => $key,
+                'label' => trim((string) $field['label']),
+                'field_type' => $type,
+                'options' => $options,
+                'placeholder' => trim((string) ($field['placeholder'] ?? '')) ?: null,
+                'help_text' => trim((string) ($field['help_text'] ?? '')) ?: null,
+                'is_required' => $type !== 'section' && (bool) ($field['is_required'] ?? false),
+                'sort_order' => (int) ($field['sort_order'] ?? $index),
+            ];
+
+            if (! empty($field['id'])) {
+                $programme->registrationFields()
+                    ->whereKey($field['id'])
+                    ->update($payload);
+            } else {
+                $programme->registrationFields()->create($payload);
+            }
+        }
+
+        return back();
+    }
+
+    public function activateRegistration(Programme $programme)
+    {
+        Programme::query()
+            ->where('is_registration_active', true)
+            ->where('id', '!=', $programme->id)
+            ->update(['is_registration_active' => false]);
+
+        $programme->forceFill([
+            'is_active' => true,
+            'is_registration_active' => true,
+        ])->save();
+
+        return back();
+    }
+
     private function storeMaterials(Request $request, Programme $programme): void
     {
-        if (!$request->hasFile('materials')) {
+        if (! $request->hasFile('materials')) {
             return;
         }
 
         $destination = public_path('event-materials');
 
-        if (!File::exists($destination)) {
+        if (! File::exists($destination)) {
             File::makeDirectory($destination, 0755, true);
         }
 
@@ -494,40 +565,72 @@ if (is_array($removeIds) && count($removeIds)) {
         }
     }
 
+    private function registrationFieldsPayload(Programme $programme): array
+    {
+        return $programme->registrationFields
+            ->map(fn ($field) => [
+                'id' => $field->id,
+                'field_key' => $field->field_key,
+                'label' => $field->label,
+                'field_type' => $field->field_type,
+                'options' => $field->options ?? [],
+                'placeholder' => $field->placeholder,
+                'help_text' => $field->help_text,
+                'is_required' => $field->is_required,
+                'sort_order' => $field->sort_order,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function uniqueFieldKey(string $value, array $usedKeys): string
+    {
+        $base = Str::of($value)->lower()->replaceMatches('/[^a-z0-9]+/', '_')->trim('_')->limit(80, '')->value();
+        $base = $base !== '' ? $base : 'field';
+        $key = $base;
+        $counter = 2;
+
+        while (in_array($key, $usedKeys, true)) {
+            $key = "{$base}_{$counter}";
+            $counter++;
+        }
+
+        return $key;
+    }
+
     public function destroy(Programme $programme)
     {
         if ($programme->image_url) {
-            $existing = public_path('event-images/' . ltrim($programme->image_url, '/'));
+            $existing = public_path('event-images/'.ltrim($programme->image_url, '/'));
             if (File::exists($existing)) {
                 File::delete($existing);
             }
         }
 
         if ($programme->pdf_url) {
-            $existing = public_path('downloadables/' . ltrim($programme->pdf_url, '/'));
+            $existing = public_path('downloadables/'.ltrim($programme->pdf_url, '/'));
             if (File::exists($existing)) {
                 File::delete($existing);
             }
         }
 
         if ($programme->signatory_signature_url) {
-            $existing = public_path('signatures/' . ltrim($programme->signatory_signature_url, '/'));
+            $existing = public_path('signatures/'.ltrim($programme->signatory_signature_url, '/'));
             if (File::exists($existing)) {
                 File::delete($existing);
             }
         }
 
         // ✅ delete event materials files + rows
-foreach ($programme->materials()->get() as $material) {
-    $existing = public_path('event-materials/' . ltrim($material->file_path, '/'));
-    if (File::exists($existing)) {
-        File::delete($existing);
-    }
-}
-$programme->materials()->delete();
+        foreach ($programme->materials()->get() as $material) {
+            $existing = public_path('event-materials/'.ltrim($material->file_path, '/'));
+            if (File::exists($existing)) {
+                File::delete($existing);
+            }
+        }
+        $programme->materials()->delete();
 
-$programme->venues()->delete();
-
+        $programme->venues()->delete();
 
         $programme->delete();
 
@@ -537,9 +640,9 @@ $programme->venues()->delete();
     private function resolveUploadName(string $originalName, string $destination): string
     {
         $candidate = $originalName;
-        $path = $destination . DIRECTORY_SEPARATOR . $candidate;
+        $path = $destination.DIRECTORY_SEPARATOR.$candidate;
 
-        if (!File::exists($path)) {
+        if (! File::exists($path)) {
             return $candidate;
         }
 
@@ -548,8 +651,8 @@ $programme->venues()->delete();
         $suffix = 1;
 
         do {
-            $candidate = $base . '-' . $suffix . ($ext ? '.' . $ext : '');
-            $path = $destination . DIRECTORY_SEPARATOR . $candidate;
+            $candidate = $base.'-'.$suffix.($ext ? '.'.$ext : '');
+            $path = $destination.DIRECTORY_SEPARATOR.$candidate;
             $suffix++;
         } while (File::exists($path));
 

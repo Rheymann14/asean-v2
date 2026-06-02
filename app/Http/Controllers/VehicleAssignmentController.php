@@ -9,6 +9,7 @@ use App\Models\TransportVehicle;
 use App\Models\User;
 use App\Models\UserType;
 use App\Models\VehicleAssignment;
+use App\Support\EventDefaults;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -107,6 +108,7 @@ class VehicleAssignmentController extends Controller
                 'starts_at' => $event->starts_at?->toISOString(),
                 'ends_at' => $event->ends_at?->toISOString(),
                 'is_active' => (bool) $event->is_active,
+                'is_registration_active' => (bool) $event->is_registration_active,
             ]),
             'selected_event_id' => $selectedEventId ?: null,
             'vehicles' => $vehicles,
@@ -236,10 +238,11 @@ class VehicleAssignmentController extends Controller
                 'starts_at' => $event->starts_at?->toISOString(),
                 'ends_at' => $event->ends_at?->toISOString(),
                 'is_active' => (bool) $event->is_active,
+                'is_registration_active' => (bool) $event->is_registration_active,
             ]),
             'selected_event_id' => $selectedEventId ?: null,
             'vehicles' => $vehicles,
-            'participants' => $participants,
+            'participants' => $participants->values()->all(),
         ]);
     }
 
@@ -269,6 +272,7 @@ class VehicleAssignmentController extends Controller
                 'starts_at' => $event->starts_at?->toISOString(),
                 'ends_at' => $event->ends_at?->toISOString(),
                 'location' => $event->location,
+                'is_registration_active' => $event->is_registration_active,
                 'vehicle_assignment' => $assignment
                     ? [
                         'vehicle_name' => $vehicle?->label ?: $assignment->vehicle_label,
@@ -411,10 +415,11 @@ class VehicleAssignmentController extends Controller
                 'starts_at' => $event->starts_at?->toISOString(),
                 'ends_at' => $event->ends_at?->toISOString(),
                 'is_active' => (bool) $event->is_active,
+                'is_registration_active' => (bool) $event->is_registration_active,
             ]),
             'selected_event_id' => $selectedEventId ?: null,
             'vehicles' => $vehicles,
-            'participants' => $participants,
+            'participants' => $participants->values()->all(),
         ]);
     }
 
@@ -606,9 +611,7 @@ class VehicleAssignmentController extends Controller
             return $requestedEventId;
         }
 
-        $activeEvent = $events->firstWhere('is_active', true);
-
-        return (int) ($activeEvent?->id ?? $events->first()?->id ?? 0);
+        return EventDefaults::defaultEventId($events);
     }
 
     private function isChedLoType(User $user): bool

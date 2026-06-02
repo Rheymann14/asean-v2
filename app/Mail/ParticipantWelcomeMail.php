@@ -26,7 +26,7 @@ class ParticipantWelcomeMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Registration Confirmed: ASEAN Philippines 2026 (Higher Education Sector) | CHED-Hosted Welcome Dinner on February 12, 2025',
+            subject: 'Registration Confirmed: '.$this->confirmationEventTitle(),
         );
     }
 
@@ -68,6 +68,7 @@ class ParticipantWelcomeMail extends Mailable
             'bagongPilipinasUrl' => $appUrl . '/img/bagong_pilipinas.png',
             'bagongPilipinasPath' => is_file($bagongPilipinasPath) ? $bagongPilipinasPath : null,
             'events' => $events,
+            'primaryEventTitle' => $events->first()['title'] ?? 'ASEAN Philippines 2026 event',
             'assignments' => $assignments,
             'qrImage' => null,
             'qrUrl' => $qrUrl,
@@ -86,5 +87,15 @@ class ParticipantWelcomeMail extends Mailable
         $payload = urlencode((string) $this->user->qr_payload);
 
         return "https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data={$payload}";
+    }
+
+    private function confirmationEventTitle(): string
+    {
+        $eventTitle = $this->user->joinedProgrammes
+            ->sortBy('starts_at')
+            ->first()
+            ?->title;
+
+        return $eventTitle ?: 'ASEAN Philippines 2026 Registration';
     }
 }

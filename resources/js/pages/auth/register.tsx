@@ -19,7 +19,12 @@ import { cn } from '@/lib/utils';
 import { login } from '@/routes';
 import { store } from '@/routes/register';
 import { Form, Head, Link, router, useRemember } from '@inertiajs/react';
+import QRCode from 'qrcode';
 import * as React from 'react';
+import type { Crop, PixelCrop } from 'react-image-crop';
+import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
+import { toast } from 'sonner';
 
 import {
     Command,
@@ -39,8 +44,10 @@ import {
     Check,
     CheckCircle2,
     ChevronsUpDown,
+    Download,
     Eye,
     EyeOff,
+    ImagePlus,
     Loader2,
     Sparkles,
 } from 'lucide-react';
@@ -64,13 +71,61 @@ type ProgrammeOption = {
     description: string | null;
     starts_at?: string | null;
     ends_at?: string | null;
+    is_registration_active?: boolean;
+    registration_fields?: RegistrationFieldOption[];
+};
+
+type RegistrationFieldOption = {
+    id: number;
+    field_key: string;
+    label: string;
+    field_type:
+        | 'section'
+        | 'text'
+        | 'textarea'
+        | 'email'
+        | 'tel'
+        | 'date'
+        | 'radio'
+        | 'checkbox'
+        | 'select';
+    options: string[];
+    placeholder?: string | null;
+    help_text?: string | null;
+    is_required: boolean;
+    sort_order: number;
 };
 
 type RegisterProps = {
     countries: CountryOption[];
     registrantTypes: RegistrantTypeOption[];
     programmes: ProgrammeOption[];
+    activeProgramme: ProgrammeOption | null;
+    registeredParticipant?: RegisteredParticipant | null;
+    asemme10Submission?: Asemme10Submission | null;
     status?: string | null;
+};
+
+type RegisteredParticipant = {
+    name: string;
+    email: string;
+    display_id: string;
+    qr_payload: string;
+    event_title?: string | null;
+};
+
+type Asemme10Submission = {
+    id: number;
+    event_title?: string | null;
+    focal_email?: string | null;
+    participants: {
+        name: string;
+        email?: string | null;
+        display_id: string;
+        qr_payload: string;
+        role?: string | null;
+        virtual_id_email_sent?: boolean;
+    }[];
 };
 
 const FOOD_RESTRICTION_OPTIONS = [
@@ -172,18 +227,202 @@ const COUNTRY_PHONE_CODE_MAP: Record<string, string> = {
     TLS: '+670',
 };
 
+const ASEMME_BRANCH_PREFIXES = [
+    'country_delegation',
+    'stakeholder_delegation',
+    'asean_secretariat',
+    'european_union',
+    'single_participant',
+] as const;
+
+const ASEMME_CONSENT_FIELD_KEYS = new Set([
+    'data_collection_confirmation',
+    'data_storage_consent',
+    'photo_video_consent',
+]);
+
+function registrationTypeToPrefix(value: string) {
+    const normalized = value.trim().toLowerCase();
+
+    if (normalized === 'country delegation') return 'country_delegation';
+    if (normalized === 'stakeholder delegation') return 'stakeholder_delegation';
+    if (normalized === 'asean secretariat') return 'asean_secretariat';
+    if (normalized === 'european union') return 'european_union';
+    if (normalized === 'other' || normalized === 'single participant') {
+        return 'single_participant';
+    }
+
+    return '';
+}
+
+function isAsemme10Programme(programme: ProgrammeOption | null) {
+    const value = `${programme?.title ?? ''}`.trim().toLowerCase();
+
+    return (
+        value.includes('asemme10') ||
+        value.includes('asemme 10') ||
+        value.includes('asia-europe meeting of ministers for education') ||
+        value.includes('10th asia-europe meeting')
+    );
+}
+
+function fieldBranchPrefix(fieldKey: string) {
+    return (
+        ASEMME_BRANCH_PREFIXES.find(
+            (prefix) => fieldKey === prefix || fieldKey.startsWith(`${prefix}_`),
+        ) ?? ''
+    );
+}
+
+function programmeHasRegistrationType(programme: ProgrammeOption) {
+    return (programme.registration_fields ?? []).some(
+        (field) => field.field_key === 'registration_type',
+    );
+}
+
+function isRegistrationFieldVisible(
+    programme: ProgrammeOption,
+    field: RegistrationFieldOption,
+    responses: Record<string, Record<string, string | string[]>>,
+) {
+    if (!programmeHasRegistrationType(programme)) {
+        return true;
+    }
+
+    const prefix = fieldBranchPrefix(field.field_key);
+    if (!prefix) {
+        return true;
+    }
+
+    const registrationTypeField = (programme.registration_fields ?? []).find(
+        (candidate) => candidate.field_key === 'registration_type',
+    );
+
+    const selectedRegistrationType = registrationTypeField
+        ? responses[String(programme.id)]?.[String(registrationTypeField.id)]
+        : '';
+
+    if (Array.isArray(selectedRegistrationType)) {
+        return false;
+    }
+
+    return registrationTypeToPrefix(String(selectedRegistrationType ?? '')) === prefix;
+}
+
+function wrapCanvasText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    maxWidth: number,
+    lineHeight: number,
+) {
+    const words = text.split(' ');
+    let line = '';
+    let currentY = y;
+
+    for (const word of words) {
+        const testLine = line ? `${line} ${word}` : word;
+        if (ctx.measureText(testLine).width > maxWidth && line) {
+            ctx.fillText(line, x, currentY);
+            line = word;
+            currentY += lineHeight;
+        } else {
+            line = testLine;
+        }
+    }
+
+    if (line) {
+        ctx.fillText(line, x, currentY);
+    }
+}
+
+function getCenteredCircleCrop(width: number, height: number): Crop {
+    return centerCrop(
+        makeAspectCrop(
+            {
+                unit: '%',
+                width: 80,
+            },
+            1,
+            width,
+            height,
+        ),
+        width,
+        height,
+    );
+}
+
+function dataUrlToFile(dataUrl: string, filename: string): File {
+    const [header, payload] = dataUrl.split(',');
+    const mime = header.match(/data:(.*?);base64/)?.[1] || 'image/jpeg';
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+
+    return new File([bytes], filename, { type: mime });
+}
+
+function getCroppedImageDataUrl(
+    image: HTMLImageElement,
+    crop: PixelCrop,
+    mimeType: 'image/png' | 'image/jpeg',
+) {
+    const canvas = document.createElement('canvas');
+    const scaleX = image.naturalWidth / image.width;
+    const scaleY = image.naturalHeight / image.height;
+    const outputSize = 512;
+
+    canvas.width = outputSize;
+    canvas.height = outputSize;
+
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+        return '';
+    }
+
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(
+        image,
+        crop.x * scaleX,
+        crop.y * scaleY,
+        crop.width * scaleX,
+        crop.height * scaleY,
+        0,
+        0,
+        outputSize,
+        outputSize,
+    );
+
+    return canvas.toDataURL(mimeType, 0.92);
+}
+
 export default function Register({
     countries,
     registrantTypes,
     programmes,
+    activeProgramme,
+    registeredParticipant,
+    asemme10Submission,
     status,
 }: RegisterProps) {
     const [formKey, setFormKey] = React.useState(0);
 
     const [currentStep, setCurrentStep] = React.useState(0);
     const submittedRef = React.useRef(false);
+    const [asemme10Processing, setAsemme10Processing] = React.useState(false);
 
     const [dirtyFields, setDirtyFields] = React.useState<
+        Record<string, boolean>
+    >({});
+    const [clientErrors, setClientErrors] = React.useState<
+        Record<string, string>
+    >({});
+    const [editedAfterSubmit, setEditedAfterSubmit] = React.useState<
         Record<string, boolean>
     >({});
 
@@ -194,9 +433,23 @@ export default function Register({
         );
     }, []);
 
+    const clearClientError = React.useCallback((name?: string) => {
+        if (!name) return;
+        setClientErrors((prev) => {
+            if (!prev[name]) return prev;
+
+            const next = { ...prev };
+            delete next[name];
+
+            return next;
+        });
+    }, []);
+
     const shouldShowError = React.useCallback(
-        (name: string) => !dirtyFields[name],
-        [dirtyFields],
+        (name: string) =>
+            !editedAfterSubmit[name] &&
+            (submittedRef.current || !dirtyFields[name]),
+        [dirtyFields, editedAfterSubmit],
     );
 
     const [honorificOpen, setHonorificOpen] = React.useState(false);
@@ -205,12 +458,30 @@ export default function Register({
 
     const [countryOpen, setCountryOpen] = React.useState(false);
     const [typeOpen, setTypeOpen] = React.useState(false);
-    const [programmeOpen, setProgrammeOpen] = React.useState(false);
     const [showPassword, setShowPassword] = React.useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
     const [successOpen, setSuccessOpen] = React.useState(false);
+    const [successQrDataUrl, setSuccessQrDataUrl] = React.useState<
+        string | null
+    >(null);
     const [preferredImagePreviewUrl, setPreferredImagePreviewUrl] =
         React.useState<string | null>(null);
+    const [preferredImageError, setPreferredImageError] =
+        React.useState<string>('');
+    const [cropImageSrc, setCropImageSrc] = React.useState('');
+    const [cropDialogOpen, setCropDialogOpen] = React.useState(false);
+    const [cropMimeType, setCropMimeType] = React.useState<
+        'image/png' | 'image/jpeg'
+    >('image/jpeg');
+    const [crop, setCrop] = React.useState<Crop>({
+        unit: '%',
+        x: 10,
+        y: 10,
+        width: 80,
+        height: 80,
+    });
+    const [completedCrop, setCompletedCrop] = React.useState<PixelCrop>();
+    const cropImageRef = React.useRef<HTMLImageElement | null>(null);
     const preferredImageInputRef = React.useRef<HTMLInputElement | null>(null);
 
     const [consentContact, setConsentContact] = React.useState(false);
@@ -268,6 +539,10 @@ export default function Register({
     const canContinue = true;
 
     const [country, setCountry] = useRemember<string>('', 'register.country');
+    const [countryOther, setCountryOther] = useRemember<string>(
+        '',
+        'register.country_other',
+    );
     const [honorificTitle, setHonorificTitle] = useRemember<string>(
         '',
         'register.honorific_title',
@@ -285,9 +560,18 @@ export default function Register({
         'register.registrant_type',
     );
     const [programmeIds, setProgrammeIds] = useRemember<string[]>(
-        [],
+        activeProgramme ? [String(activeProgramme.id)] : [],
         'register.programme_ids',
     );
+    const [registrationResponses, setRegistrationResponses] = useRemember<
+        Record<string, Record<string, string | string[]>>
+    >({}, 'register.registration_responses');
+    const [dynamicOtherResponses, setDynamicOtherResponses] = useRemember<
+        Record<string, string>
+    >({}, 'register.registration_response_others');
+    const [dynamicSelectOpen, setDynamicSelectOpen] = React.useState<
+        Record<string, boolean>
+    >({});
     const [otherRegistrantType, setOtherRegistrantType] = useRemember<string>(
         '',
         'register.other_user_type',
@@ -300,7 +584,7 @@ export default function Register({
 
     React.useEffect(() => {
         return () => {
-            if (preferredImagePreviewUrl) {
+            if (preferredImagePreviewUrl?.startsWith('blob:')) {
                 URL.revokeObjectURL(preferredImagePreviewUrl);
             }
         };
@@ -310,24 +594,101 @@ export default function Register({
         event: React.ChangeEvent<HTMLInputElement>,
     ) => {
         const file = event.target.files?.[0] ?? null;
+        event.target.value = '';
+
+        if (!file) {
+            return;
+        }
+
+        if (!['image/png', 'image/jpeg'].includes(file.type)) {
+            setPreferredImageError('Upload a PNG, JPG, or JPEG image.');
+            return;
+        }
+
+        setPreferredImageError('');
+        setCropMimeType(file.type === 'image/png' ? 'image/png' : 'image/jpeg');
+        setCrop({
+            unit: '%',
+            x: 10,
+            y: 10,
+            width: 80,
+            height: 80,
+        });
+        setCompletedCrop(undefined);
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            setCropImageSrc(String(reader.result));
+            setCropDialogOpen(true);
+        };
+        reader.onerror = () => {
+            setPreferredImageError('Could not read the selected image.');
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const handleUseCroppedPreferredImage = () => {
+        const image = cropImageRef.current;
+
+        if (!image) {
+            return;
+        }
+
+        const fallbackSize = Math.round(
+            Math.min(image.width, image.height) * 0.8,
+        );
+        const fallbackCrop: PixelCrop = {
+            unit: 'px',
+            x: Math.round((image.width - fallbackSize) / 2),
+            y: Math.round((image.height - fallbackSize) / 2),
+            width: fallbackSize,
+            height: fallbackSize,
+        };
+        const croppedDataUrl = getCroppedImageDataUrl(
+            image,
+            completedCrop ?? fallbackCrop,
+            cropMimeType,
+        );
+
+        if (!croppedDataUrl) {
+            setPreferredImageError('Could not crop the selected image.');
+            return;
+        }
+
+        const extension = cropMimeType === 'image/png' ? 'png' : 'jpg';
+        const file = dataUrlToFile(
+            croppedDataUrl,
+            `profile-photo.${extension}`,
+        );
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+
+        if (preferredImageInputRef.current) {
+            preferredImageInputRef.current.files = transfer.files;
+        }
 
         setPreferredImagePreviewUrl((current) => {
-            if (current) {
+            if (current?.startsWith('blob:')) {
                 URL.revokeObjectURL(current);
             }
 
-            return file ? URL.createObjectURL(file) : null;
+            return croppedDataUrl;
         });
+        setPreferredImageError('');
+        setCropDialogOpen(false);
     };
 
     const handleRemovePreferredImage = () => {
         setPreferredImagePreviewUrl((current) => {
-            if (current) {
+            if (current?.startsWith('blob:')) {
                 URL.revokeObjectURL(current);
             }
 
             return null;
         });
+        setPreferredImageError('');
+        setCropImageSrc('');
+        setCompletedCrop(undefined);
 
         if (preferredImageInputRef.current) {
             preferredImageInputRef.current.value = '';
@@ -398,47 +759,786 @@ export default function Register({
         }
     }, [ipAffiliation]);
 
+    React.useEffect(() => {
+        if (country) clearClientError('country_id');
+    }, [clearClientError, country]);
+
+    React.useEffect(() => {
+        if (honorificTitle) clearClientError('honorific_title');
+    }, [clearClientError, honorificTitle]);
+
+    React.useEffect(() => {
+        if (honorificOther.trim()) clearClientError('honorific_other');
+    }, [clearClientError, honorificOther]);
+
+    React.useEffect(() => {
+        if (sexAssignedAtBirth) clearClientError('sex_assigned_at_birth');
+    }, [clearClientError, sexAssignedAtBirth]);
+
+    React.useEffect(() => {
+        if (contactCountryCode) clearClientError('contact_country_code');
+    }, [clearClientError, contactCountryCode]);
+
+    React.useEffect(() => {
+        if (registrantType) clearClientError('user_type_id');
+    }, [clearClientError, registrantType]);
+
+    React.useEffect(() => {
+        if (otherRegistrantType.trim()) clearClientError('other_user_type');
+    }, [clearClientError, otherRegistrantType]);
+
+    React.useEffect(() => {
+        if (programmeIds.length) clearClientError('programme_ids');
+    }, [clearClientError, programmeIds.length]);
+
+    React.useEffect(() => {
+        if (!activeProgramme) {
+            setProgrammeIds([]);
+            return;
+        }
+
+        setProgrammeIds([String(activeProgramme.id)]);
+    }, [activeProgramme?.id, setProgrammeIds]);
+
     const selectedProgrammes = React.useMemo(
-        () =>
-            programmes.filter((programme) =>
-                programmeIds.includes(String(programme.id)),
-            ),
-        [programmeIds, programmes],
+        () => (activeProgramme ? [activeProgramme] : []),
+        [activeProgramme],
     );
+    const isAsemme10Registration = React.useMemo(
+        () => isAsemme10Programme(activeProgramme),
+        [activeProgramme],
+    );
+    const eventDetailsStepIndex = isAsemme10Registration ? 0 : 3;
 
     const formattedProgrammeLabel = React.useMemo(() => {
-        if (!selectedProgrammes.length) {
-            return 'Select events to join…';
+        if (!activeProgramme) {
+            return 'No active registration event';
         }
 
-        if (selectedProgrammes.length === 1) {
-            return selectedProgrammes[0].title;
-        }
+        return activeProgramme.title;
+    }, [activeProgramme]);
 
-        return `${selectedProgrammes.length} events selected`;
-    }, [selectedProgrammes]);
+    const selectedProgrammesWithFields = React.useMemo(
+        () =>
+            selectedProgrammes.filter(
+                (programme) => (programme.registration_fields ?? []).length > 0,
+            ),
+        [selectedProgrammes],
+    );
 
-    const steps = [
-        {
-            title: 'Personal details',
-            description: 'Personal Details.',
+    const getDynamicValue = React.useCallback(
+        (programmeId: number, fieldId: number) =>
+            registrationResponses[String(programmeId)]?.[String(fieldId)] ?? '',
+        [registrationResponses],
+    );
+
+    const setDynamicValue = React.useCallback(
+        (programmeId: number, fieldId: number, value: string | string[]) => {
+            clearClientError(
+                `registration_responses.${programmeId}.${fieldId}`,
+            );
+            setRegistrationResponses((prev) => ({
+                ...prev,
+                [String(programmeId)]: {
+                    ...(prev[String(programmeId)] ?? {}),
+                    [String(fieldId)]: value,
+                },
+            }));
         },
-        {
-            title: 'Contact & role',
-            description: 'Organization, contact, and registrant type.',
+        [clearClientError, setRegistrationResponses],
+    );
+
+    const dynamicOtherKey = React.useCallback(
+        (programmeId: number, fieldId: number) =>
+            `${programmeId}-${fieldId}`,
+        [],
+    );
+
+    const dynamicOtherErrorKey = React.useCallback(
+        (programmeId: number, fieldId: number) =>
+            `registration_responses.${programmeId}.${fieldId}.other`,
+        [],
+    );
+
+    const getDynamicOtherValue = React.useCallback(
+        (programmeId: number, fieldId: number) =>
+            dynamicOtherResponses[dynamicOtherKey(programmeId, fieldId)] ?? '',
+        [dynamicOtherKey, dynamicOtherResponses],
+    );
+
+    const setDynamicOtherValue = React.useCallback(
+        (programmeId: number, fieldId: number, value: string) => {
+            clearClientError(dynamicOtherErrorKey(programmeId, fieldId));
+            setDynamicOtherResponses((prev) => ({
+                ...prev,
+                [dynamicOtherKey(programmeId, fieldId)]: value,
+            }));
         },
-        {
-            title: 'Account',
-            description: 'Set your password.',
+        [
+            clearClientError,
+            dynamicOtherErrorKey,
+            dynamicOtherKey,
+            setDynamicOtherResponses,
+        ],
+    );
+
+    const toggleDynamicCheckbox = React.useCallback(
+        (
+            programmeId: number,
+            fieldId: number,
+            option: string,
+            checked: boolean,
+        ) => {
+            const current = getDynamicValue(programmeId, fieldId);
+            const currentValues = Array.isArray(current) ? current : [];
+            const next = checked
+                ? Array.from(new Set([...currentValues, option]))
+                : currentValues.filter((value) => value !== option);
+
+            setDynamicValue(programmeId, fieldId, next);
         },
-        {
-            title: 'Preferences',
-            description:
-                'Food Restrictions, accessibility, emergency contact, and consents.',
+        [getDynamicValue, setDynamicValue],
+    );
+
+    const dynamicErrorKey = React.useCallback(
+        (programmeId: number, fieldId: number) =>
+            `registration_responses.${programmeId}.${fieldId}`,
+        [],
+    );
+
+    const stepErrorKeys = React.useCallback(
+        (step: number) => {
+            if (isAsemme10Registration) {
+                if (step !== eventDetailsStepIndex) {
+                    return [];
+                }
+
+                return selectedProgrammes.flatMap((programme) =>
+                    (programme.registration_fields ?? [])
+                        .filter((field) => field.field_type !== 'section')
+                        .filter((field) =>
+                            isRegistrationFieldVisible(
+                                programme,
+                                field,
+                                registrationResponses,
+                            ),
+                        )
+                        .flatMap((field) => [
+                            dynamicErrorKey(programme.id, field.id),
+                            dynamicOtherErrorKey(programme.id, field.id),
+                        ]),
+                );
+            }
+
+            if (step === 0) {
+                return [
+                    'country_id',
+                    'honorific_title',
+                    'honorific_other',
+                    'given_name',
+                    'family_name',
+                    'sex_assigned_at_birth',
+                ];
+            }
+
+            if (step === 1) {
+                return [
+                    'organization_name',
+                    'position_title',
+                    'email',
+                    'contact_country_code',
+                    'contact_number',
+                    'user_type_id',
+                    'other_user_type',
+                    'programme_ids',
+                    'programme_ids.0',
+                ];
+            }
+
+            if (step === 2) {
+                return ['password', 'password_confirmation'];
+            }
+
+            return selectedProgrammes.flatMap((programme) =>
+                (programme.registration_fields ?? [])
+                    .filter((field) => field.field_type !== 'section')
+                    .filter((field) =>
+                        isRegistrationFieldVisible(
+                            programme,
+                            field,
+                            registrationResponses,
+                        ),
+                    )
+                    .map((field) => dynamicErrorKey(programme.id, field.id)),
+            );
         },
-    ] as const;
+        [
+            dynamicErrorKey,
+            dynamicOtherErrorKey,
+            eventDetailsStepIndex,
+            isAsemme10Registration,
+            registrationResponses,
+            selectedProgrammes,
+        ],
+    );
+
+    const validateStep = React.useCallback(
+        (step: number) => {
+            const form = document.getElementById(
+                'register-form',
+            ) as HTMLFormElement | null;
+            const formData = form ? new FormData(form) : new FormData();
+            const nextErrors: Record<string, string> = {};
+            const valueOf = (name: string) =>
+                String(formData.get(name) ?? '').trim();
+            const requireValue = (name: string, label: string) => {
+                if (!valueOf(name)) {
+                    nextErrors[name] = `${label} is required.`;
+                }
+            };
+            const optionIsOther = (option: string) =>
+                option.trim().toLowerCase() === 'other';
+            const selectedOther = (
+                field: RegistrationFieldOption,
+                value: string | string[],
+            ) =>
+                (field.options ?? []).some(optionIsOther) &&
+                (Array.isArray(value)
+                    ? value.some((item) => optionIsOther(String(item)))
+                    : optionIsOther(String(value)));
+
+            if (isAsemme10Registration && step === eventDetailsStepIndex) {
+                selectedProgrammes.forEach((programme) => {
+                    const fieldByKey = new Map(
+                        (programme.registration_fields ?? []).map((field) => [
+                            field.field_key,
+                            field,
+                        ]),
+                    );
+                    const dynamicStringFor = (key: string) => {
+                        const field = fieldByKey.get(key);
+                        const value = field
+                            ? getDynamicValue(programme.id, field.id)
+                            : '';
+
+                        return Array.isArray(value)
+                            ? ''
+                            : String(value ?? '').trim();
+                    };
+                    const requireDynamicField = (
+                        key: string,
+                        label: string,
+                    ) => {
+                        const field = fieldByKey.get(key);
+
+                        if (!field || dynamicStringFor(key)) {
+                            return;
+                        }
+
+                        nextErrors[dynamicErrorKey(programme.id, field.id)] =
+                            `${label} is required.`;
+                    };
+
+                    (programme.registration_fields ?? []).forEach((field) => {
+                        if (
+                            field.field_type === 'section' ||
+                            !isRegistrationFieldVisible(
+                                programme,
+                                field,
+                                registrationResponses,
+                            )
+                        ) {
+                            return;
+                        }
+
+                        const key = dynamicErrorKey(programme.id, field.id);
+                        const value = getDynamicValue(programme.id, field.id);
+                        const isBlank = Array.isArray(value)
+                            ? value.every((item) => !String(item).trim())
+                            : !String(value).trim();
+
+                        if (field.is_required && isBlank) {
+                            nextErrors[key] = `${field.label} is required.`;
+                            return;
+                        }
+
+                        if (
+                            field.field_type === 'email' &&
+                            !isBlank &&
+                            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))
+                        ) {
+                            nextErrors[key] =
+                                `${field.label} must be a valid email address.`;
+                        }
+
+                        if (
+                            selectedOther(field, value) &&
+                            !getDynamicOtherValue(
+                                programme.id,
+                                field.id,
+                            ).trim()
+                        ) {
+                            nextErrors[
+                                dynamicOtherErrorKey(programme.id, field.id)
+                            ] = `Please specify ${field.label.toLowerCase()}.`;
+                        }
+                    });
+
+                    const registrationType = dynamicStringFor(
+                        'registration_type',
+                    );
+                    const prefix = registrationTypeToPrefix(registrationType);
+
+                    if (prefix === 'single_participant') {
+                        requireDynamicField(
+                            'single_participant_given_name',
+                            'Given name',
+                        );
+                        requireDynamicField(
+                            'single_participant_family_name',
+                            'Family name',
+                        );
+                        requireDynamicField(
+                            'single_participant_email',
+                            'Email',
+                        );
+                    } else if (prefix) {
+                        requireDynamicField(
+                            `${prefix}_head_given_name`,
+                            'Head given name',
+                        );
+                        requireDynamicField(
+                            `${prefix}_head_family_name`,
+                            'Head family name',
+                        );
+                        requireDynamicField(
+                            prefix === 'country_delegation'
+                                ? `${prefix}_head_email`
+                                : `${prefix}_email`,
+                            'Head email',
+                        );
+                    }
+                });
+
+                return nextErrors;
+            }
+
+            if (step === 0) {
+                requireValue('country_id', 'Country of Origin');
+                requireValue('honorific_title', 'Honorific / Title');
+
+                if (honorificTitle === 'other') {
+                    requireValue('honorific_other', 'Other honorific');
+                }
+
+                requireValue('given_name', 'Given Name / First Name');
+                requireValue('family_name', 'Family Name / Surname');
+                requireValue('sex_assigned_at_birth', 'Sex assigned at birth');
+            }
+
+            if (step === 1) {
+                requireValue('organization_name', 'Organization');
+                requireValue('position_title', 'Designation / Position');
+                requireValue('email', 'Email address');
+                requireValue('contact_country_code', 'Country code');
+                requireValue('contact_number', 'Contact number');
+                requireValue('user_type_id', 'Registrant type');
+
+                const emailValue = valueOf('email');
+                if (
+                    emailValue &&
+                    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)
+                ) {
+                    nextErrors.email = 'Email address must be valid.';
+                }
+
+                if (isOtherRegistrantType) {
+                    requireValue('other_user_type', 'Other registrant type');
+                }
+
+                if (!programmeIds.length) {
+                    nextErrors.programme_ids =
+                        'No active registration event is available.';
+                }
+            }
+
+            if (step === 2) {
+                const password = valueOf('password');
+                const passwordConfirmation = valueOf('password_confirmation');
+
+                if (!password) {
+                    nextErrors.password = 'Password is required.';
+                } else if (password.length < 8) {
+                    nextErrors.password =
+                        'Password must be at least 8 characters.';
+                }
+
+                if (!passwordConfirmation) {
+                    nextErrors.password_confirmation =
+                        'Password confirmation is required.';
+                } else if (password !== passwordConfirmation) {
+                    nextErrors.password_confirmation =
+                        'Password confirmation does not match.';
+                }
+            }
+
+            if (step === 3) {
+                selectedProgrammes.forEach((programme) => {
+                    (programme.registration_fields ?? []).forEach((field) => {
+                        if (
+                            field.field_type === 'section' ||
+                            !isRegistrationFieldVisible(
+                                programme,
+                                field,
+                                registrationResponses,
+                            )
+                        ) {
+                            return;
+                        }
+
+                        const key = dynamicErrorKey(programme.id, field.id);
+                        const value = getDynamicValue(programme.id, field.id);
+                        const isBlank = Array.isArray(value)
+                            ? value.every((item) => !String(item).trim())
+                            : !String(value).trim();
+
+                        if (field.is_required && isBlank) {
+                            nextErrors[key] = `${field.label} is required.`;
+                            return;
+                        }
+
+                        if (
+                            field.field_type === 'email' &&
+                            !isBlank &&
+                            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))
+                        ) {
+                            nextErrors[key] =
+                                `${field.label} must be a valid email address.`;
+                        }
+                    });
+                });
+            }
+
+            return nextErrors;
+        },
+        [
+            dynamicErrorKey,
+            dynamicOtherErrorKey,
+            eventDetailsStepIndex,
+            getDynamicValue,
+            getDynamicOtherValue,
+            honorificTitle,
+            isAsemme10Registration,
+            isOtherRegistrantType,
+            programmeIds.length,
+            registrationResponses,
+            selectedProgrammes,
+        ],
+    );
+
+    const applyClientValidation = React.useCallback(
+        (stepsToValidate: number[]) => {
+            const nextErrors = stepsToValidate.reduce<Record<string, string>>(
+                (errors, step) => ({ ...errors, ...validateStep(step) }),
+                {},
+            );
+            const keysToClear = stepsToValidate.flatMap(stepErrorKeys);
+
+            setClientErrors((prev) => {
+                const next = { ...prev };
+
+                keysToClear.forEach((key) => {
+                    delete next[key];
+                });
+
+                return { ...next, ...nextErrors };
+            });
+
+            return nextErrors;
+        },
+        [stepErrorKeys, validateStep],
+    );
+
+    const steps = isAsemme10Registration
+        ? [
+              {
+                  title: 'Event details',
+                  description: 'ASEMME10 registration details.',
+              },
+          ]
+        : [
+              {
+                  title: 'Personal details',
+                  description: 'Personal Details.',
+              },
+              {
+                  title: 'Contact & role',
+                  description: 'Organization, contact, and registrant type.',
+              },
+              {
+                  title: 'Account',
+                  description: 'Set your password.',
+              },
+              {
+                  title: 'Event details',
+                  description:
+                      'Questions configured for your selected event(s).',
+              },
+          ];
+
+    const fieldErrorKeyForAsemmeServerError = React.useCallback(
+        (serverKey: string) => {
+            if (!isAsemme10Registration || !activeProgramme) {
+                return serverKey;
+            }
+
+            const fields = activeProgramme.registration_fields ?? [];
+            const fieldByKey = new Map(
+                fields.map((field) => [field.field_key, field]),
+            );
+            const dynamicKeyFor = (fieldKey: string) => {
+                const field = fieldByKey.get(fieldKey);
+
+                return field
+                    ? dynamicErrorKey(activeProgramme.id, field.id)
+                    : null;
+            };
+            const dynamicOtherKeyFor = (fieldKey: string) => {
+                const field = fieldByKey.get(fieldKey);
+
+                return field
+                    ? dynamicOtherErrorKey(activeProgramme.id, field.id)
+                    : null;
+            };
+            const stringFor = (fieldKey: string) => {
+                const field = fieldByKey.get(fieldKey);
+                const value = field
+                    ? getDynamicValue(activeProgramme.id, field.id)
+                    : '';
+
+                return Array.isArray(value)
+                    ? ''
+                    : String(value ?? '').trim();
+            };
+            const prefix = registrationTypeToPrefix(
+                stringFor('registration_type'),
+            );
+            const headEmailKey =
+                prefix === 'country_delegation'
+                    ? `${prefix}_head_email`
+                    : `${prefix}_email`;
+
+            const directMap: Record<string, string> = {
+                registration_type: 'registration_type',
+                'consents.data_collection': 'data_collection_confirmation',
+                'consents.data_storage': 'data_storage_consent',
+                'consents.photo_video': 'photo_video_consent',
+                'focal.email':
+                    prefix === 'single_participant'
+                        ? 'single_participant_email'
+                        : headEmailKey,
+                'focal.name':
+                    prefix === 'single_participant'
+                        ? 'single_participant_given_name'
+                        : `${prefix}_head_given_name`,
+                'focal.organization':
+                    prefix === 'single_participant'
+                        ? 'single_participant_organisation_name'
+                        : prefix === 'country_delegation'
+                          ? `${prefix}_head_ministry_name`
+                          : `${prefix}_organisation_name`,
+                'focal.position':
+                    prefix === 'single_participant'
+                        ? 'single_participant_position'
+                        : `${prefix}_position`,
+            };
+
+            if (serverKey === 'delegation.registration_type_other') {
+                return dynamicOtherKeyFor('registration_type') ?? serverKey;
+            }
+
+            if (serverKey === 'delegation.social_activity_other') {
+                return (
+                    dynamicOtherKeyFor(
+                        prefix === 'single_participant'
+                            ? 'single_participant_social_activities'
+                            : `${prefix}_social_activities`,
+                    ) ?? serverKey
+                );
+            }
+
+            if (directMap[serverKey]) {
+                return dynamicKeyFor(directMap[serverKey]) ?? serverKey;
+            }
+
+            const attendeeMatch = serverKey.match(
+                /^attendees\.(\d+)\.(title_other|title|given_name|family_name|email)$/,
+            );
+
+            if (attendeeMatch && prefix) {
+                const attendeeIndex = Number(attendeeMatch[1]);
+                const attribute = attendeeMatch[2];
+                const fieldSuffix =
+                    attribute === 'title_other'
+                        ? 'title'
+                        : attribute === 'given_name'
+                          ? 'given_name'
+                          : attribute === 'family_name'
+                            ? 'family_name'
+                            : attribute;
+
+                if (prefix === 'single_participant') {
+                    const fieldKey = `single_participant_${fieldSuffix}`;
+
+                    return attribute === 'title_other'
+                        ? (dynamicOtherKeyFor(fieldKey) ?? serverKey)
+                        : (dynamicKeyFor(fieldKey) ?? serverKey);
+                }
+
+                const fieldKey =
+                    attendeeIndex === 0
+                        ? fieldSuffix === 'email'
+                            ? headEmailKey
+                            : `${prefix}_head_${fieldSuffix}`
+                        : `${prefix}_delegate_${attendeeIndex}_${fieldSuffix}`;
+
+                return attribute === 'title_other'
+                    ? (dynamicOtherKeyFor(fieldKey) ?? serverKey)
+                    : (dynamicKeyFor(fieldKey) ?? serverKey);
+            }
+
+            if (serverKey === 'attendees') {
+                return (
+                    dynamicKeyFor(
+                        prefix === 'single_participant'
+                            ? 'single_participant_given_name'
+                            : `${prefix}_head_given_name`,
+                    ) ?? serverKey
+                );
+            }
+
+            return serverKey;
+        },
+        [
+            activeProgramme,
+            dynamicErrorKey,
+            dynamicOtherErrorKey,
+            getDynamicValue,
+            isAsemme10Registration,
+        ],
+    );
+
+    const firstValidationMessage = React.useCallback(
+        (errors: Record<string, string | string[] | undefined>) => {
+            for (const value of Object.values(errors)) {
+                const message = Array.isArray(value) ? value[0] : value;
+
+                if (message) {
+                    return message;
+                }
+            }
+
+            return 'Please correct the highlighted field.';
+        },
+        [],
+    );
+
+    const scrollToErrorKey = React.useCallback((errorKey: string) => {
+        window.setTimeout(() => {
+            const escaped = window.CSS?.escape
+                ? window.CSS.escape(errorKey)
+                : errorKey.replace(/["\\]/g, '\\$&');
+            const target = document.querySelector<HTMLElement>(
+                [
+                    `[data-error-key="${escaped}"]`,
+                    `[name="${escaped}"]`,
+                    `[name="${escaped}[]"]`,
+                    `#${escaped}`,
+                ].join(','),
+            );
+
+            if (!target) {
+                return;
+            }
+
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            const focusTarget =
+                target.matches(
+                    'input:not([type="hidden"]), textarea, button, [tabindex]:not([tabindex="-1"])',
+                )
+                    ? target
+                    : target.querySelector<HTMLElement>(
+                          'input:not([type="hidden"]), textarea, button, [tabindex]:not([tabindex="-1"])',
+                      );
+
+            focusTarget?.focus({ preventScroll: true });
+        }, 80);
+    }, []);
+
+    const showValidationFeedback = React.useCallback(
+        (
+            errors: Record<string, string | string[] | undefined>,
+            mapServerErrors = false,
+        ) => {
+            const mappedErrors = Object.entries(errors).reduce<
+                Record<string, string>
+            >((next, [key, value]) => {
+                const message = Array.isArray(value) ? value[0] : value;
+
+                if (!message) {
+                    return next;
+                }
+
+                next[
+                    mapServerErrors
+                        ? fieldErrorKeyForAsemmeServerError(key)
+                        : key
+                ] = message;
+
+                return next;
+            }, {});
+            const firstKey = Object.keys(mappedErrors)[0];
+
+            if (!firstKey) {
+                return mappedErrors;
+            }
+
+            setClientErrors((prev) => ({ ...prev, ...mappedErrors }));
+
+            const firstInvalidStep = steps.findIndex((_, index) =>
+                stepErrorKeys(index).some((key) => mappedErrors[key]),
+            );
+
+            if (firstInvalidStep >= 0) {
+                setCurrentStep(firstInvalidStep);
+            }
+
+            toast.error('Please check the registration form.', {
+                description: firstValidationMessage(mappedErrors),
+            });
+            scrollToErrorKey(firstKey);
+
+            return mappedErrors;
+        },
+        [
+            fieldErrorKeyForAsemmeServerError,
+            firstValidationMessage,
+            scrollToErrorKey,
+            stepErrorKeys,
+            steps,
+        ],
+    );
 
     const goNext = () => {
+        submittedRef.current = true;
+
+        const nextErrors = applyClientValidation([currentStep]);
+        if (Object.keys(nextErrors).length > 0) {
+            showValidationFeedback(nextErrors);
+            return;
+        }
+
         setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
     };
 
@@ -451,10 +1551,20 @@ export default function Register({
         setFormKey((k) => k + 1);
 
         setDirtyFields({});
+        setClientErrors({});
+        setEditedAfterSubmit({});
+        setPreferredImagePreviewUrl(null);
+        setPreferredImageError('');
+        setCropImageSrc('');
+        setCropDialogOpen(false);
+        setCompletedCrop(undefined);
 
         setCountry('');
+        setCountryOther('');
         setRegistrantType('');
         setProgrammeIds([]);
+        setRegistrationResponses({});
+        setDynamicOtherResponses({});
         setShowPassword(false);
         setShowConfirmPassword(false);
         setConsentContact(false);
@@ -479,7 +1589,10 @@ export default function Register({
         setCurrentStep(0);
     }, [
         setCountry,
+        setCountryOther,
         setProgrammeIds,
+        setRegistrationResponses,
+        setDynamicOtherResponses,
         setRegistrantType,
         setOtherRegistrantType,
         setAccessibilityNeeds,
@@ -502,11 +1615,41 @@ export default function Register({
     ]);
 
     React.useEffect(() => {
-        if (status === 'registered') {
+        if (status === 'registered' || status === 'asemme10-registered') {
             setSuccessOpen(true);
             resetFormState();
         }
     }, [resetFormState, status]);
+
+    React.useEffect(() => {
+        let active = true;
+        const value = registeredParticipant?.qr_payload?.trim();
+
+        if (!value) {
+            setSuccessQrDataUrl(null);
+            return;
+        }
+
+        QRCode.toDataURL(value, {
+            width: 320,
+            margin: 1,
+            errorCorrectionLevel: 'M',
+            color: {
+                dark: '#000000',
+                light: '#ffffff',
+            },
+        })
+            .then((url) => {
+                if (active) setSuccessQrDataUrl(url);
+            })
+            .catch(() => {
+                if (active) setSuccessQrDataUrl(null);
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [registeredParticipant?.qr_payload]);
 
     const inputClass =
         'h-11 rounded-xl border-slate-200 bg-white shadow-[inset_0_1px_2px_rgba(2,6,23,0.06)] ' +
@@ -528,7 +1671,324 @@ export default function Register({
             year: 'numeric',
         });
     };
-    const errorSteps = new Set<number>();
+
+    const downloadVirtualId = React.useCallback(async () => {
+        if (!registeredParticipant || !successQrDataUrl) return;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 1200;
+        canvas.height = 760;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const qrImage = await new Promise<HTMLImageElement>(
+            (resolve, reject) => {
+                const image = new Image();
+                image.onload = () => resolve(image);
+                image.onerror = reject;
+                image.src = successQrDataUrl;
+            },
+        );
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#0033A0';
+        ctx.fillRect(0, 0, canvas.width, 132);
+        ctx.fillStyle = '#FCD116';
+        ctx.fillRect(0, 132, canvas.width, 12);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '700 44px Arial, sans-serif';
+        ctx.fillText('VIRTUAL PARTICIPANT ID', 56, 82);
+
+        ctx.fillStyle = '#475569';
+        ctx.font = '600 24px Arial, sans-serif';
+        ctx.fillText(
+            registeredParticipant.event_title || 'Registration Event',
+            56,
+            190,
+        );
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '700 54px Arial, sans-serif';
+        wrapCanvasText(ctx, registeredParticipant.name, 56, 288, 680, 62);
+
+        ctx.fillStyle = '#475569';
+        ctx.font = '400 28px Arial, sans-serif';
+        ctx.fillText(registeredParticipant.email, 56, 430);
+
+        ctx.fillStyle = '#0033A0';
+        ctx.font = '700 36px Arial, sans-serif';
+        ctx.fillText(registeredParticipant.display_id, 56, 520);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(790, 190, 320, 320);
+        ctx.drawImage(qrImage, 790, 190, 320, 320);
+
+        ctx.fillStyle = '#334155';
+        ctx.font = '600 22px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Scan for event verification', 950, 556);
+        ctx.textAlign = 'left';
+
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillRect(56, 640, 1088, 1);
+        ctx.fillStyle = '#64748b';
+        ctx.font = '400 20px Arial, sans-serif';
+        ctx.fillText(
+            'Please present this virtual ID at event check-in.',
+            56,
+            690,
+        );
+
+        const link = document.createElement('a');
+        link.download = `${registeredParticipant.display_id || 'virtual-id'}.jpg`;
+        link.href = canvas.toDataURL('image/jpeg', 0.94);
+        link.click();
+    }, [registeredParticipant, successQrDataUrl]);
+
+    const submitAsemme10Registration = React.useCallback(() => {
+        if (!activeProgramme) return;
+
+        const fields = activeProgramme.registration_fields ?? [];
+        const fieldByKey = new Map(fields.map((field) => [field.field_key, field]));
+        const valueFor = (key: string): string | string[] => {
+            const field = fieldByKey.get(key);
+
+            return field ? getDynamicValue(activeProgramme.id, field.id) : '';
+        };
+        const stringFor = (key: string) => {
+            const value = valueFor(key);
+
+            return Array.isArray(value) ? '' : String(value ?? '').trim();
+        };
+        const arrayFor = (key: string) => {
+            const value = valueFor(key);
+
+            return Array.isArray(value)
+                ? value.map((item) => String(item).trim()).filter(Boolean)
+                : [];
+        };
+        const otherFor = (key: string) => {
+            const field = fieldByKey.get(key);
+
+            return field
+                ? getDynamicOtherValue(activeProgramme.id, field.id).trim()
+                : '';
+        };
+        const withOther = (key: string) => {
+            const value = stringFor(key);
+            const other = otherFor(key);
+
+            return value.toLowerCase() === 'other' && other
+                ? `Other: ${other}`
+                : value;
+        };
+
+        const registrationType = stringFor('registration_type');
+        const prefix = registrationTypeToPrefix(registrationType);
+        const countryName =
+            countryOther.trim() ||
+            selectedCountry?.name ||
+            stringFor('country_delegation_country');
+        const countryId = country && !countryOther.trim() ? country : null;
+        const headOrganisationKey =
+            prefix === 'country_delegation'
+                ? 'head_ministry_name'
+                : 'organisation_name';
+        const headEmailKey =
+            prefix === 'country_delegation' ? 'head_email' : 'email';
+
+        const attendee = (role: string, keyPrefix: string) => ({
+            role,
+            title: stringFor(`${keyPrefix}_title`) || null,
+            title_other: otherFor(`${keyPrefix}_title`) || null,
+            given_name: stringFor(`${keyPrefix}_given_name`),
+            family_name: stringFor(`${keyPrefix}_family_name`),
+            badge_name: stringFor(`${keyPrefix}_badge_name`),
+            organization_name:
+                stringFor(`${keyPrefix}_ministry_or_organisation`) ||
+                stringFor(`${keyPrefix}_organisation`) ||
+                stringFor(`${keyPrefix}_organization_name`) ||
+                stringFor(`${keyPrefix}_head_ministry_name`) ||
+                stringFor(`${prefix}_${headOrganisationKey}`),
+            position_title:
+                stringFor(`${keyPrefix}_job_title`) ||
+                stringFor(`${keyPrefix}_position`) ||
+                stringFor(`${prefix}_position`),
+            email:
+                stringFor(`${keyPrefix}_email`) ||
+                stringFor(`${prefix}_${headEmailKey}`),
+            dietary_requirements: stringFor(`${prefix}_dietary_requirements`),
+            mobility_or_special_needs: stringFor(
+                `${prefix}_mobility_or_special_needs`,
+            ),
+        });
+
+        const attendees = [];
+
+        if (prefix === 'single_participant') {
+            attendees.push({
+                role: 'single_participant',
+                title: stringFor('single_participant_title') || null,
+                title_other: otherFor('single_participant_title') || null,
+                given_name: stringFor('single_participant_given_name'),
+                family_name: stringFor('single_participant_family_name'),
+                badge_name: '',
+                organization_name: stringFor(
+                    'single_participant_organisation_name',
+                ),
+                position_title: stringFor('single_participant_position'),
+                email: stringFor('single_participant_email'),
+                dietary_requirements: stringFor(
+                    'single_participant_dietary_requirements',
+                ),
+                mobility_or_special_needs: stringFor(
+                    'single_participant_mobility_or_special_needs',
+                ),
+            });
+        } else if (prefix) {
+            attendees.push(attendee('head', `${prefix}_head`));
+
+            for (let index = 1; index <= 3; index += 1) {
+                const delegatePrefix = `${prefix}_delegate_${index}`;
+                const delegate = attendee(
+                    `delegate_${index}`,
+                    delegatePrefix,
+                );
+
+                if (
+                    delegate.given_name ||
+                    delegate.family_name ||
+                    delegate.email
+                ) {
+                    attendees.push(delegate);
+                }
+            }
+        }
+
+        const focalAttendee = attendees[0] ?? {
+            given_name: '',
+            family_name: '',
+            email: '',
+            organization_name: '',
+            position_title: '',
+        };
+        const socialActivities =
+            prefix === 'single_participant'
+                ? arrayFor('single_participant_social_activities')
+                : arrayFor(`${prefix}_social_activities`);
+
+        setAsemme10Processing(true);
+        router.post(
+            '/asemme10-registration',
+            {
+                programme_id: activeProgramme.id,
+                country_id: countryId,
+                registration_type: registrationType,
+                focal: {
+                    name: [
+                        focalAttendee.given_name,
+                        focalAttendee.family_name,
+                    ]
+                        .filter(Boolean)
+                        .join(' '),
+                    email: focalAttendee.email,
+                    phone:
+                        stringFor(`${prefix}_contact_mobile_number`) ||
+                        stringFor('single_participant_contact_mobile_number'),
+                    organization: focalAttendee.organization_name,
+                    position: focalAttendee.position_title,
+                },
+                consents: {
+                    data_collection: stringFor(
+                        'data_collection_confirmation',
+                    )
+                        ? 'yes'
+                        : '',
+                    data_storage: stringFor('data_storage_consent')
+                        ? 'yes'
+                        : '',
+                    photo_video: stringFor('photo_video_consent') ? 'yes' : '',
+                },
+                delegation: {
+                    country: countryName,
+                    country_other: countryOther.trim() || null,
+                    minister_responsibility_type: withOther(
+                        `${prefix}_minister_responsibility_type`,
+                    ),
+                    speech_topic: withOther(`${prefix}_speech_topic`),
+                    registration_type_other:
+                        otherFor('registration_type') || null,
+                    social_activities: socialActivities,
+                    social_activity_other:
+                        otherFor(`${prefix}_social_activities`) ||
+                        otherFor('single_participant_social_activities') ||
+                        null,
+                    social_activity_details:
+                        stringFor(`${prefix}_social_activity_details`) ||
+                        stringFor('single_participant_social_activity_details'),
+                    bilateral_meeting_interest: withOther(
+                        `${prefix}_bilateral_meeting_interest`,
+                    ),
+                    bilateral_contact_emails: stringFor(
+                        `${prefix}_bilateral_contact_emails`,
+                    ),
+                    bilateral_comments: stringFor(
+                        `${prefix}_bilateral_comments`,
+                    ),
+                    additional_comments:
+                        stringFor(
+                            `${prefix}_additional_comments_on_delegation`,
+                        ) ||
+                        stringFor('single_participant_additional_comments') ||
+                        stringFor('single_participant_other_comments'),
+                },
+                attendees,
+            },
+            {
+                preserveScroll: true,
+                onError: (errors) => {
+                    showValidationFeedback(errors, true);
+                },
+                onFinish: () => setAsemme10Processing(false),
+            },
+        );
+    }, [
+        activeProgramme,
+        country,
+        countryOther,
+        getDynamicOtherValue,
+        getDynamicValue,
+        selectedCountry?.name,
+        showValidationFeedback,
+    ]);
+
+    const submitCurrentRegistration = React.useCallback(() => {
+        submittedRef.current = true;
+        setEditedAfterSubmit({});
+
+        const nextErrors = applyClientValidation(
+            steps.map((_, index) => index),
+        );
+
+        if (Object.keys(nextErrors).length > 0) {
+            showValidationFeedback(nextErrors);
+            return false;
+        }
+
+        if (isAsemme10Registration) {
+            submitAsemme10Registration();
+        }
+
+        return true;
+    }, [
+        applyClientValidation,
+        isAsemme10Registration,
+        steps,
+        showValidationFeedback,
+        submitAsemme10Registration,
+    ]);
 
     return (
         <RegisterLayout>
@@ -553,7 +2013,9 @@ export default function Register({
                 <h1 className="text-2xl font-semibold tracking-tight text-balance text-slate-700/90 sm:text-3xl">
                     <span className="relative inline-block">
                         <span className="relative z-10">
-                            Participant Registration
+                            {activeProgramme
+                                ? `${activeProgramme.title} Registration`
+                                : 'Participant Registration'}
                         </span>
                     </span>
                 </h1>
@@ -574,17 +2036,70 @@ export default function Register({
                         | HTMLSelectElement
                         | HTMLTextAreaElement;
                     markDirty(target?.name);
+                    clearClientError(target?.name);
+                    if (target?.name) {
+                        setEditedAfterSubmit((prev) =>
+                            prev[target.name]
+                                ? prev
+                                : { ...prev, [target.name]: true },
+                        );
+                    }
                 }}
-                onSubmitCapture={() => {
+                onSubmitCapture={(event) => {
+                    if (isAsemme10Registration) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.nativeEvent.stopImmediatePropagation?.();
+                        submitCurrentRegistration();
+
+                        return;
+                    }
+
                     submittedRef.current = true;
+                    setEditedAfterSubmit({});
+                    const nextErrors = applyClientValidation(
+                        steps.map((_, index) => index),
+                    );
+
+                    if (Object.keys(nextErrors).length > 0) {
+                        event.preventDefault();
+                        showValidationFeedback(nextErrors);
+
+                        return;
+                    }
+                }}
+                onError={(errors) => {
+                    showValidationFeedback(errors, isAsemme10Registration);
                 }}
                 onSuccess={() => {
                     resetFormState();
                     setSuccessOpen(true);
                 }}
             >
-                {({ processing }) => {
-                    const err = {} as Record<string, string | undefined>;
+                {({ processing, errors }) => {
+                    const effectiveProcessing =
+                        processing || asemme10Processing;
+                    const serverErrors = errors as Record<
+                        string,
+                        string | undefined
+                    >;
+                    const err = {
+                        ...clientErrors,
+                    };
+                    Object.entries(serverErrors).forEach(([key, value]) => {
+                        if (value && !editedAfterSubmit[key]) {
+                            err[key] = value;
+                        }
+                    });
+                    const errorSteps = new Set<number>(
+                        steps
+                            .map((_, index) =>
+                                stepErrorKeys(index).some((key) => err[key])
+                                    ? index
+                                    : null,
+                            )
+                            .filter((index): index is number => index !== null),
+                    );
                     const showIfEmpty = (msg?: string, value?: string) =>
                         msg && !value?.trim() ? msg : undefined;
 
@@ -737,7 +2252,47 @@ export default function Register({
                                             value={need}
                                         />
                                     ))}
+                                    {selectedProgrammes.flatMap((programme) =>
+                                        (programme.registration_fields ?? [])
+                                            .filter(
+                                                (field) =>
+                                                    field.field_type !==
+                                                        'section' &&
+                                                    isRegistrationFieldVisible(
+                                                        programme,
+                                                        field,
+                                                        registrationResponses,
+                                                    ),
+                                            )
+                                            .flatMap((field) => {
+                                                const value = getDynamicValue(
+                                                    programme.id,
+                                                    field.id,
+                                                );
 
+                                                if (Array.isArray(value)) {
+                                                    return value.map((item) => (
+                                                        <input
+                                                            key={`${programme.id}-${field.id}-${item}`}
+                                                            type="hidden"
+                                                            name={`registration_responses[${programme.id}][${field.id}][]`}
+                                                            value={item}
+                                                        />
+                                                    ));
+                                                }
+
+                                                return (
+                                                    <input
+                                                        key={`${programme.id}-${field.id}`}
+                                                        type="hidden"
+                                                        name={`registration_responses[${programme.id}][${field.id}]`}
+                                                        value={value}
+                                                    />
+                                                );
+                                            }),
+                                    )}
+
+                                    {!isAsemme10Registration ? (
                                     <fieldset
                                         data-active={currentStep === 0}
                                         aria-hidden={currentStep !== 0}
@@ -1362,54 +2917,81 @@ export default function Register({
                                             <Label htmlFor="profile_photo">
                                                 Preferred image for ID
                                             </Label>
-                                            <Input
-                                                ref={preferredImageInputRef}
-                                                id="profile_photo"
-                                                type="file"
-                                                name="profile_photo"
-                                                accept="image/*"
-                                                onChange={
-                                                    handlePreferredImageChange
-                                                }
-                                                className={cn(
-                                                    inputClass,
-                                                    'file:mr-3 file:rounded-md file:border-0 file:bg-[#0033A0]/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-[#0033A0] hover:file:bg-[#0033A0]/20',
-                                                )}
-                                            />
-
-                                            {preferredImagePreviewUrl ? (
-                                                <div className="mt-2 overflow-hidden rounded-md border border-slate-200 bg-slate-50 p-2">
-                                                    <div className="mb-2 flex items-center justify-between gap-2">
-                                                        <p className="text-xs font-medium text-slate-600">
-                                                            Preview
-                                                        </p>
-                                                        <Button
-                                                            type="button"
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-7 px-2 text-xs text-slate-600 hover:text-slate-900"
-                                                            onClick={
-                                                                handleRemovePreferredImage
-                                                            }
-                                                        >
-                                                            Remove image
-                                                        </Button>
+                                            <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center">
+                                                <div className="grid justify-items-center gap-2">
+                                                    <div className="grid size-32 place-items-center overflow-hidden rounded-full border border-slate-200 bg-slate-50 shadow-sm ring-4 ring-white">
+                                                        {preferredImagePreviewUrl ? (
+                                                            <img
+                                                                src={
+                                                                    preferredImagePreviewUrl
+                                                                }
+                                                                alt="Preferred image preview"
+                                                                className="size-full object-cover"
+                                                            />
+                                                        ) : (
+                                                            <ImagePlus className="size-9 text-slate-400" />
+                                                        )}
                                                     </div>
-                                                    <img
-                                                        src={
-                                                            preferredImagePreviewUrl
+                                                    <p className="text-xs text-slate-500">
+                                                        Circle crop preview
+                                                    </p>
+                                                </div>
+
+                                                <div className="grid flex-1 gap-2">
+                                                    <p className="text-sm text-slate-600">
+                                                        Upload a clear front
+                                                        facing photo. You can
+                                                        resize and position the
+                                                        circular crop before it
+                                                        is attached to your
+                                                        registration.
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <Label
+                                                            htmlFor="profile_photo"
+                                                            className="inline-flex h-9 cursor-pointer items-center justify-center rounded-lg bg-[#0033A0] px-4 text-sm font-medium text-white shadow-sm transition hover:bg-[#002b86]"
+                                                        >
+                                                            Upload image
+                                                        </Label>
+                                                        {preferredImagePreviewUrl ? (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-9 rounded-lg"
+                                                                onClick={
+                                                                    handleRemovePreferredImage
+                                                                }
+                                                            >
+                                                                Remove image
+                                                            </Button>
+                                                        ) : null}
+                                                    </div>
+                                                    <Input
+                                                        ref={
+                                                            preferredImageInputRef
                                                         }
-                                                        alt="Preferred image preview"
-                                                        className="h-40 w-auto rounded-md object-cover"
+                                                        id="profile_photo"
+                                                        type="file"
+                                                        name="profile_photo"
+                                                        accept="image/png,image/jpeg"
+                                                        onChange={
+                                                            handlePreferredImageChange
+                                                        }
+                                                        className="sr-only"
                                                     />
                                                 </div>
-                                            ) : null}
+                                            </div>
 
                                             <InputError
-                                                message={err.profile_photo}
+                                                message={
+                                                    preferredImageError ||
+                                                    err.profile_photo
+                                                }
                                             />
                                         </div>
                                     </fieldset>
+                                    ) : null}
 
                                     <fieldset
                                         data-active={currentStep === 1}
@@ -1835,7 +3417,7 @@ export default function Register({
 
                                         <div className="grid gap-2">
                                             <Label htmlFor="programme_ids">
-                                                Select events to join
+                                                Registration event
                                             </Label>
                                             {programmeIds.map((id) => (
                                                 <input
@@ -1846,186 +3428,224 @@ export default function Register({
                                                 />
                                             ))}
 
-                                            <Popover
-                                                open={programmeOpen}
-                                                onOpenChange={setProgrammeOpen}
-                                            >
-                                                <PopoverTrigger asChild>
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        role="combobox"
-                                                        aria-expanded={
-                                                            programmeOpen
+                                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-[inset_0_1px_2px_rgba(2,6,23,0.06)]">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <Sparkles className="h-4 w-4 text-[#0033A0]" />
+                                                    <span className="font-medium text-slate-800">
+                                                        {
+                                                            formattedProgrammeLabel
                                                         }
-                                                        className={
-                                                            comboboxTriggerClass
-                                                        }
-                                                        tabIndex={6}
-                                                    >
-                                                        <span className="flex min-w-0 items-center gap-2">
-                                                            <Sparkles className="h-4 w-4 text-[#0033A0]" />
-                                                            <span className="truncate text-left">
-                                                                {
-                                                                    formattedProgrammeLabel
-                                                                }
-                                                            </span>
-                                                        </span>
-                                                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                                                    </Button>
-                                                </PopoverTrigger>
+                                                    </span>
+                                                    {activeProgramme ? (
+                                                        <Badge
+                                                            variant="secondary"
+                                                            className="bg-slate-100 text-slate-600"
+                                                        >
+                                                            <CalendarRange className="h-3 w-3" />
+                                                            {formatProgrammeDate(
+                                                                activeProgramme.starts_at,
+                                                            )}
+                                                        </Badge>
+                                                    ) : null}
+                                                    {activeProgramme?.is_registration_active ? (
+                                                        <Badge
+                                                            variant="secondary"
+                                                            className="bg-[#0033A0]/10 text-[#0033A0]"
+                                                        >
+                                                            Active registration
+                                                        </Badge>
+                                                    ) : null}
+                                                </div>
 
-                                                <PopoverContent
-                                                    align="start"
-                                                    sideOffset={8}
-                                                    className={cn(
-                                                        'z-50 p-0',
-                                                        'w-[min(calc(100vw-1.5rem),var(--radix-popover-trigger-width))]',
-                                                        'sm:w-[520px]',
-                                                    )}
+                                                {activeProgramme?.description ? (
+                                                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                                                        {
+                                                            activeProgramme.description
+                                                        }
+                                                    </p>
+                                                ) : null}
+                                            </div>
+
+                                            {false ? (
+                                                <Popover
+                                                    open={false}
+                                                    onOpenChange={() => {}}
                                                 >
-                                                    <Command className="overflow-hidden rounded-xl">
-                                                        <CommandInput placeholder="Search events…" />
+                                                    <PopoverTrigger asChild>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            role="combobox"
+                                                            aria-expanded={
+                                                                false
+                                                            }
+                                                            className={
+                                                                comboboxTriggerClass
+                                                            }
+                                                            tabIndex={6}
+                                                        >
+                                                            <span className="flex min-w-0 items-center gap-2">
+                                                                <Sparkles className="h-4 w-4 text-[#0033A0]" />
+                                                                <span className="truncate text-left">
+                                                                    {
+                                                                        formattedProgrammeLabel
+                                                                    }
+                                                                </span>
+                                                            </span>
+                                                            <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                                                        </Button>
+                                                    </PopoverTrigger>
 
-                                                        <CommandEmpty>
-                                                            No events found.
-                                                        </CommandEmpty>
+                                                    <PopoverContent
+                                                        align="start"
+                                                        sideOffset={8}
+                                                        className={cn(
+                                                            'z-50 p-0',
+                                                            'w-[min(calc(100vw-1.5rem),var(--radix-popover-trigger-width))]',
+                                                            'sm:w-[520px]',
+                                                        )}
+                                                    >
+                                                        <Command className="overflow-hidden rounded-xl">
+                                                            <CommandInput placeholder="Search events…" />
 
-                                                        {/* ✅ scrollable list (mobile friendly) */}
-                                                        <CommandList className="max-h-[320px] overflow-auto sm:max-h-[380px]">
-                                                            <CommandGroup>
-                                                                {programmes.map(
-                                                                    (item) => {
-                                                                        const isSelected =
-                                                                            programmeIds.includes(
-                                                                                String(
-                                                                                    item.id,
-                                                                                ),
-                                                                            );
+                                                            <CommandEmpty>
+                                                                No events found.
+                                                            </CommandEmpty>
 
-                                                                        return (
-                                                                            <CommandItem
-                                                                                key={
-                                                                                    item.id
-                                                                                }
-                                                                                value={`${item.title} ${item.description ?? ''}`}
-                                                                                onSelect={() => {
-                                                                                    setProgrammeIds(
-                                                                                        (
-                                                                                            prev,
-                                                                                        ) => {
-                                                                                            const next =
-                                                                                                new Set(
-                                                                                                    prev,
-                                                                                                );
-                                                                                            const id =
-                                                                                                String(
-                                                                                                    item.id,
-                                                                                                );
+                                                            {/* ✅ scrollable list (mobile friendly) */}
+                                                            <CommandList className="max-h-[320px] overflow-auto sm:max-h-[380px]">
+                                                                <CommandGroup>
+                                                                    {programmes.map(
+                                                                        (
+                                                                            item,
+                                                                        ) => {
+                                                                            const isSelected =
+                                                                                programmeIds.includes(
+                                                                                    String(
+                                                                                        item.id,
+                                                                                    ),
+                                                                                );
 
-                                                                                            if (
-                                                                                                next.has(
-                                                                                                    id,
+                                                                            return (
+                                                                                <CommandItem
+                                                                                    key={
+                                                                                        item.id
+                                                                                    }
+                                                                                    value={`${item.title} ${item.description ?? ''}`}
+                                                                                    onSelect={() => {
+                                                                                        setProgrammeIds(
+                                                                                            (
+                                                                                                prev,
+                                                                                            ) => {
+                                                                                                const next =
+                                                                                                    new Set(
+                                                                                                        prev,
+                                                                                                    );
+                                                                                                const id =
+                                                                                                    String(
+                                                                                                        item.id,
+                                                                                                    );
+
+                                                                                                if (
+                                                                                                    next.has(
+                                                                                                        id,
+                                                                                                    )
                                                                                                 )
-                                                                                            )
-                                                                                                next.delete(
-                                                                                                    id,
-                                                                                                );
-                                                                                            else
-                                                                                                next.add(
-                                                                                                    id,
-                                                                                                );
+                                                                                                    next.delete(
+                                                                                                        id,
+                                                                                                    );
+                                                                                                else
+                                                                                                    next.add(
+                                                                                                        id,
+                                                                                                    );
 
-                                                                                            return Array.from(
-                                                                                                next,
-                                                                                            );
-                                                                                        },
-                                                                                    );
-                                                                                }}
-                                                                                className="items-start gap-3"
-                                                                            >
-                                                                                {/* ✅ show check ONLY when selected */}
-                                                                                <span
-                                                                                    className={cn(
-                                                                                        'mt-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border',
-                                                                                        isSelected
-                                                                                            ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm'
-                                                                                            : 'border-slate-200 bg-white',
-                                                                                    )}
+                                                                                                return Array.from(
+                                                                                                    next,
+                                                                                                );
+                                                                                            },
+                                                                                        );
+                                                                                    }}
+                                                                                    className="items-start gap-3"
                                                                                 >
-                                                                                    {isSelected ? (
-                                                                                        <Check className="h-3.5 w-3.5" />
-                                                                                    ) : null}
-                                                                                </span>
+                                                                                    {/* ✅ show check ONLY when selected */}
+                                                                                    <span
+                                                                                        className={cn(
+                                                                                            'mt-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border',
+                                                                                            isSelected
+                                                                                                ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm'
+                                                                                                : 'border-slate-200 bg-white',
+                                                                                        )}
+                                                                                    >
+                                                                                        {isSelected ? (
+                                                                                            <Check className="h-3.5 w-3.5" />
+                                                                                        ) : null}
+                                                                                    </span>
 
-                                                                                <div className="min-w-0 flex-1 space-y-2">
-                                                                                    <div className="flex flex-wrap items-center gap-2">
-                                                                                        <span className="min-w-0 truncate font-medium text-slate-700">
-                                                                                            {
-                                                                                                item.title
-                                                                                            }
-                                                                                        </span>
+                                                                                    <div className="min-w-0 flex-1 space-y-2">
+                                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                                            <span className="min-w-0 truncate font-medium text-slate-700">
+                                                                                                {
+                                                                                                    item.title
+                                                                                                }
+                                                                                            </span>
 
-                                                                                        <Badge
-                                                                                            variant="secondary"
-                                                                                            className="bg-slate-100 text-slate-600"
-                                                                                        >
-                                                                                            <CalendarRange className="h-3 w-3" />
-                                                                                            {formatProgrammeDate(
-                                                                                                item.starts_at,
-                                                                                            )}
-                                                                                        </Badge>
+                                                                                            <Badge
+                                                                                                variant="secondary"
+                                                                                                className="bg-slate-100 text-slate-600"
+                                                                                            >
+                                                                                                <CalendarRange className="h-3 w-3" />
+                                                                                                {formatProgrammeDate(
+                                                                                                    item.starts_at,
+                                                                                                )}
+                                                                                            </Badge>
 
-                                                                                        <Badge
-                                                                                            variant="outline"
-                                                                                            className="border-slate-200 text-slate-500"
-                                                                                        >
-                                                                                            Ends{' '}
-                                                                                            {formatProgrammeDate(
-                                                                                                item.ends_at,
-                                                                                            )}
-                                                                                        </Badge>
+                                                                                            <Badge
+                                                                                                variant="outline"
+                                                                                                className="border-slate-200 text-slate-500"
+                                                                                            >
+                                                                                                Ends{' '}
+                                                                                                {formatProgrammeDate(
+                                                                                                    item.ends_at,
+                                                                                                )}
+                                                                                            </Badge>
+                                                                                        </div>
+
+                                                                                        {item.description && (
+                                                                                            <p className="text-sm break-words text-slate-500">
+                                                                                                {
+                                                                                                    item.description
+                                                                                                }
+                                                                                            </p>
+                                                                                        )}
                                                                                     </div>
+                                                                                </CommandItem>
+                                                                            );
+                                                                        },
+                                                                    )}
+                                                                </CommandGroup>
+                                                            </CommandList>
 
-                                                                                    {item.description && (
-                                                                                        <p className="text-sm break-words text-slate-500">
-                                                                                            {
-                                                                                                item.description
-                                                                                            }
-                                                                                        </p>
-                                                                                    )}
-                                                                                </div>
-                                                                            </CommandItem>
-                                                                        );
-                                                                    },
-                                                                )}
-                                                            </CommandGroup>
-                                                        </CommandList>
+                                                            {/* ✅ tiny footer so users can close on mobile easily */}
+                                                            <div className="flex items-center justify-between border-t bg-white/70 px-3 py-2">
+                                                                <p className="text-xs text-slate-500">
+                                                                    {programmeIds.length
+                                                                        ? `${programmeIds.length} selected`
+                                                                        : 'Select one or more events'}
+                                                                </p>
 
-                                                        {/* ✅ tiny footer so users can close on mobile easily */}
-                                                        <div className="flex items-center justify-between border-t bg-white/70 px-3 py-2">
-                                                            <p className="text-xs text-slate-500">
-                                                                {programmeIds.length
-                                                                    ? `${programmeIds.length} selected`
-                                                                    : 'Select one or more events'}
-                                                            </p>
-
-                                                            <Button
-                                                                type="button"
-                                                                variant="ghost"
-                                                                className="h-8 rounded-lg px-2 text-xs"
-                                                                onClick={() =>
-                                                                    setProgrammeOpen(
-                                                                        false,
-                                                                    )
-                                                                }
-                                                            >
-                                                                Done
-                                                            </Button>
-                                                        </div>
-                                                    </Command>
-                                                </PopoverContent>
-                                            </Popover>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    className="h-8 rounded-lg px-2 text-xs"
+                                                                    onClick={() => {}}
+                                                                >
+                                                                    Done
+                                                                </Button>
+                                                            </div>
+                                                        </Command>
+                                                    </PopoverContent>
+                                                </Popover>
+                                            ) : null}
 
                                             <InputError
                                                 message={
@@ -2042,25 +3662,27 @@ export default function Register({
                                                 }
                                             />
 
-                                            {selectedProgrammes.length > 0 && (
-                                                <div className="flex flex-wrap gap-2">
-                                                    {selectedProgrammes.map(
-                                                        (programme) => (
-                                                            <Badge
-                                                                key={
-                                                                    programme.id
-                                                                }
-                                                                variant="secondary"
-                                                                className="bg-[#0033A0]/10 text-[#0033A0]"
-                                                            >
-                                                                {
-                                                                    programme.title
-                                                                }
-                                                            </Badge>
-                                                        ),
-                                                    )}
-                                                </div>
-                                            )}
+                                            {false &&
+                                                selectedProgrammes.length >
+                                                    0 && (
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {selectedProgrammes.map(
+                                                            (programme) => (
+                                                                <Badge
+                                                                    key={
+                                                                        programme.id
+                                                                    }
+                                                                    variant="secondary"
+                                                                    className="bg-[#0033A0]/10 text-[#0033A0]"
+                                                                >
+                                                                    {
+                                                                        programme.title
+                                                                    }
+                                                                </Badge>
+                                                            ),
+                                                        )}
+                                                    </div>
+                                                )}
                                         </div>
                                     </fieldset>
 
@@ -2185,11 +3807,869 @@ export default function Register({
                                     </fieldset>
 
                                     <fieldset
-                                        data-active={currentStep === 3}
-                                        aria-hidden={currentStep !== 3}
+                                        data-active={
+                                            currentStep ===
+                                            eventDetailsStepIndex
+                                        }
+                                        aria-hidden={
+                                            currentStep !==
+                                            eventDetailsStepIndex
+                                        }
                                         className={cn(
                                             'grid gap-3 text-left',
-                                            currentStep === 3 ? '' : 'hidden',
+                                            currentStep ===
+                                                eventDetailsStepIndex
+                                                ? ''
+                                                : 'hidden',
+                                        )}
+                                    >
+                                        {selectedProgrammesWithFields.length ? (
+                                            selectedProgrammesWithFields.map(
+                                                (programme) => (
+                                                    <div
+                                                        key={programme.id}
+                                                        className="rounded-xl border border-slate-200/70 bg-white/70 p-3 backdrop-blur"
+                                                    >
+                                                        <div>
+                                                            <p className="text-[11px] font-semibold tracking-wide text-slate-700 uppercase">
+                                                                {
+                                                                    programme.title
+                                                                }
+                                                            </p>
+                                                            <p className="mt-1 text-sm leading-snug text-slate-600">
+                                                                Event-specific
+                                                                registration
+                                                                details.
+                                                            </p>
+                                                        </div>
+
+                                                        <div className="mt-4 grid gap-4">
+                                                            {(
+                                                                programme.registration_fields ??
+                                                                []
+                                                            )
+                                                                .filter((field) =>
+                                                                    isRegistrationFieldVisible(
+                                                                        programme,
+                                                                        field,
+                                                                        registrationResponses,
+                                                                    ),
+                                                                )
+                                                                .map((field) => {
+                                                                const value =
+                                                                    getDynamicValue(
+                                                                        programme.id,
+                                                                        field.id,
+                                                                    );
+                                                                const stringValue =
+                                                                    Array.isArray(
+                                                                        value,
+                                                                    )
+                                                                        ? ''
+                                                                        : value;
+                                                                const fieldErrorKey =
+                                                                    dynamicErrorKey(
+                                                                        programme.id,
+                                                                        field.id,
+                                                                    );
+                                                                const fieldError =
+                                                                    err[
+                                                                        fieldErrorKey
+                                                                    ];
+                                                                const otherError =
+                                                                    err[
+                                                                        dynamicOtherErrorKey(
+                                                                            programme.id,
+                                                                            field.id,
+                                                                        )
+                                                                    ];
+                                                                const otherValue =
+                                                                    getDynamicOtherValue(
+                                                                        programme.id,
+                                                                        field.id,
+                                                                    );
+                                                                const fieldHasOther =
+                                                                    (
+                                                                        field.options ??
+                                                                        []
+                                                                    ).some(
+                                                                        (
+                                                                            option,
+                                                                        ) =>
+                                                                            option
+                                                                                .trim()
+                                                                                .toLowerCase() ===
+                                                                            'other',
+                                                                    );
+                                                                const fieldOtherSelected =
+                                                                    fieldHasOther &&
+                                                                    (Array.isArray(
+                                                                        value,
+                                                                    )
+                                                                        ? value.some(
+                                                                              (
+                                                                                  item,
+                                                                              ) =>
+                                                                                  String(
+                                                                                      item,
+                                                                                  )
+                                                                                      .trim()
+                                                                                      .toLowerCase() ===
+                                                                                  'other',
+                                                                          )
+                                                                        : String(
+                                                                              value,
+                                                                          )
+                                                                              .trim()
+                                                                              .toLowerCase() ===
+                                                                          'other');
+                                                                const isCountryDelegationCountry =
+                                                                    field.field_key ===
+                                                                    'country_delegation_country';
+                                                                const isAsemme10ConsentField =
+                                                                    isAsemme10Registration &&
+                                                                    ASEMME_CONSENT_FIELD_KEYS.has(
+                                                                        field.field_key,
+                                                                    );
+
+                                                                if (
+                                                                    field.field_type ===
+                                                                    'section'
+                                                                ) {
+                                                                    return (
+                                                                        <div
+                                                                            key={
+                                                                                field.id
+                                                                            }
+                                                                            className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0"
+                                                                        >
+                                                                            <p className="text-sm font-semibold tracking-wide text-slate-800 uppercase">
+                                                                                {
+                                                                                    field.label
+                                                                                }
+                                                                            </p>
+                                                                            {field.help_text ? (
+                                                                                <p className="mt-1 text-sm text-slate-500">
+                                                                                    {
+                                                                                        field.help_text
+                                                                                    }
+                                                                                </p>
+                                                                            ) : null}
+                                                                        </div>
+                                                                    );
+                                                                }
+
+                                                                if (
+                                                                    isAsemme10Registration &&
+                                                                    isCountryDelegationCountry
+                                                                ) {
+                                                                    return (
+                                                                        <div
+                                                                            key={
+                                                                                field.id
+                                                                            }
+                                                                            data-error-key={
+                                                                                fieldErrorKey
+                                                                            }
+                                                                            className="grid gap-2"
+                                                                        >
+                                                                            <Label>
+                                                                                {
+                                                                                    field.label
+                                                                                }
+                                                                            </Label>
+                                                                            <Popover
+                                                                                open={
+                                                                                    countryOpen
+                                                                                }
+                                                                                onOpenChange={
+                                                                                    setCountryOpen
+                                                                                }
+                                                                            >
+                                                                                <PopoverTrigger
+                                                                                    asChild
+                                                                                >
+                                                                                    <Button
+                                                                                        type="button"
+                                                                                        variant="outline"
+                                                                                        role="combobox"
+                                                                                        aria-expanded={
+                                                                                            countryOpen
+                                                                                        }
+                                                                                        className={
+                                                                                            comboboxTriggerClass
+                                                                                        }
+                                                                                    >
+                                                                                        <span className="flex min-w-0 items-center gap-2">
+                                                                                            {countryOther ? (
+                                                                                                <span className="truncate">
+                                                                                                    Other:{' '}
+                                                                                                    {
+                                                                                                        countryOther
+                                                                                                    }
+                                                                                                </span>
+                                                                                            ) : selectedCountry ? (
+                                                                                                <>
+                                                                                                    {selectedCountry.flag_url ? (
+                                                                                                        <img
+                                                                                                            src={
+                                                                                                                selectedCountry.flag_url
+                                                                                                            }
+                                                                                                            alt=""
+                                                                                                            className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
+                                                                                                            loading="lazy"
+                                                                                                            draggable={
+                                                                                                                false
+                                                                                                            }
+                                                                                                        />
+                                                                                                    ) : (
+                                                                                                        <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
+                                                                                                            {
+                                                                                                                selectedCountry.code
+                                                                                                            }
+                                                                                                        </span>
+                                                                                                    )}
+                                                                                                    <span className="truncate">
+                                                                                                        {
+                                                                                                            selectedCountry.name
+                                                                                                        }
+                                                                                                    </span>
+                                                                                                </>
+                                                                                            ) : (
+                                                                                                <span className="text-muted-foreground">
+                                                                                                    Select
+                                                                                                    country...
+                                                                                                </span>
+                                                                                            )}
+                                                                                        </span>
+                                                                                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                                                                                    </Button>
+                                                                                </PopoverTrigger>
+                                                                                <PopoverContent
+                                                                                    className="z-50 w-[--radix-popover-trigger-width] p-0"
+                                                                                    align="start"
+                                                                                >
+                                                                                    <Command>
+                                                                                        <CommandInput placeholder="Search country..." />
+                                                                                        <CommandEmpty>
+                                                                                            No
+                                                                                            country
+                                                                                            found.
+                                                                                        </CommandEmpty>
+                                                                                        <CommandList className="max-h-[320px] overflow-auto overscroll-contain sm:max-h-[380px]">
+                                                                                            <CommandGroup heading="ASEAN Countries">
+                                                                                                {groupedCountries.asean.map(
+                                                                                                    (
+                                                                                                        item,
+                                                                                                    ) => (
+                                                                                                        <CommandItem
+                                                                                                            key={
+                                                                                                                item.id
+                                                                                                            }
+                                                                                                            value={
+                                                                                                                item.name
+                                                                                                            }
+                                                                                                            onSelect={() => {
+                                                                                                                setCountry(
+                                                                                                                    String(
+                                                                                                                        item.id,
+                                                                                                                    ),
+                                                                                                                );
+                                                                                                                setCountryOther(
+                                                                                                                    '',
+                                                                                                                );
+                                                                                                                setDynamicValue(
+                                                                                                                    programme.id,
+                                                                                                                    field.id,
+                                                                                                                    item.name,
+                                                                                                                );
+                                                                                                                setCountryOpen(
+                                                                                                                    false,
+                                                                                                                );
+                                                                                                            }}
+                                                                                                            className="gap-2"
+                                                                                                        >
+                                                                                                            {item.flag_url ? (
+                                                                                                                <img
+                                                                                                                    src={
+                                                                                                                        item.flag_url
+                                                                                                                    }
+                                                                                                                    alt=""
+                                                                                                                    className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
+                                                                                                                    loading="lazy"
+                                                                                                                    draggable={
+                                                                                                                        false
+                                                                                                                    }
+                                                                                                                />
+                                                                                                            ) : (
+                                                                                                                <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
+                                                                                                                    {
+                                                                                                                        item.code
+                                                                                                                    }
+                                                                                                                </span>
+                                                                                                            )}
+                                                                                                            <span className="truncate">
+                                                                                                                {
+                                                                                                                    item.name
+                                                                                                                }
+                                                                                                            </span>
+                                                                                                            <Check
+                                                                                                                className={cn(
+                                                                                                                    'ml-auto h-4 w-4',
+                                                                                                                    country ===
+                                                                                                                        String(
+                                                                                                                            item.id,
+                                                                                                                        ) &&
+                                                                                                                        !countryOther
+                                                                                                                        ? 'opacity-100'
+                                                                                                                        : 'opacity-0',
+                                                                                                                )}
+                                                                                                            />
+                                                                                                        </CommandItem>
+                                                                                                    ),
+                                                                                                )}
+                                                                                            </CommandGroup>
+                                                                                            {groupedCountries.nonAsean.length >
+                                                                                            0 ? (
+                                                                                                <CommandGroup heading="Non-ASEAN Countries">
+                                                                                                    {groupedCountries.nonAsean.map(
+                                                                                                        (
+                                                                                                            item,
+                                                                                                        ) => (
+                                                                                                            <CommandItem
+                                                                                                                key={
+                                                                                                                    item.id
+                                                                                                                }
+                                                                                                                value={`${item.name} ${item.code}`}
+                                                                                                                onSelect={() => {
+                                                                                                                    setCountry(
+                                                                                                                        String(
+                                                                                                                            item.id,
+                                                                                                                        ),
+                                                                                                                    );
+                                                                                                                    setCountryOther(
+                                                                                                                        '',
+                                                                                                                    );
+                                                                                                                    setDynamicValue(
+                                                                                                                        programme.id,
+                                                                                                                        field.id,
+                                                                                                                        item.name,
+                                                                                                                    );
+                                                                                                                    setCountryOpen(
+                                                                                                                        false,
+                                                                                                                    );
+                                                                                                                }}
+                                                                                                                className="gap-2"
+                                                                                                            >
+                                                                                                                {item.flag_url ? (
+                                                                                                                    <img
+                                                                                                                        src={
+                                                                                                                            item.flag_url
+                                                                                                                        }
+                                                                                                                        alt=""
+                                                                                                                        className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
+                                                                                                                        loading="lazy"
+                                                                                                                        draggable={
+                                                                                                                            false
+                                                                                                                        }
+                                                                                                                    />
+                                                                                                                ) : (
+                                                                                                                    <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
+                                                                                                                        {
+                                                                                                                            item.code
+                                                                                                                        }
+                                                                                                                    </span>
+                                                                                                                )}
+                                                                                                                <span className="truncate">
+                                                                                                                    {
+                                                                                                                        item.name
+                                                                                                                    }
+                                                                                                                </span>
+                                                                                                                <Check
+                                                                                                                    className={cn(
+                                                                                                                        'ml-auto h-4 w-4',
+                                                                                                                        country ===
+                                                                                                                            String(
+                                                                                                                                item.id,
+                                                                                                                            ) &&
+                                                                                                                            !countryOther
+                                                                                                                            ? 'opacity-100'
+                                                                                                                            : 'opacity-0',
+                                                                                                                    )}
+                                                                                                                />
+                                                                                                            </CommandItem>
+                                                                                                        ),
+                                                                                                    )}
+                                                                                                </CommandGroup>
+                                                                                            ) : null}
+                                                                                            <CommandGroup heading="Other">
+                                                                                                <CommandItem
+                                                                                                    value="Other country"
+                                                                                                    onSelect={() => {
+                                                                                                        setCountry(
+                                                                                                            '',
+                                                                                                        );
+                                                                                                        setCountryOther(
+                                                                                                            'Other',
+                                                                                                        );
+                                                                                                        setDynamicValue(
+                                                                                                            programme.id,
+                                                                                                            field.id,
+                                                                                                            'Other',
+                                                                                                        );
+                                                                                                        setCountryOpen(
+                                                                                                            false,
+                                                                                                        );
+                                                                                                    }}
+                                                                                                >
+                                                                                                    Other
+                                                                                                    <Check
+                                                                                                        className={cn(
+                                                                                                            'ml-auto h-4 w-4',
+                                                                                                            countryOther
+                                                                                                                ? 'opacity-100'
+                                                                                                                : 'opacity-0',
+                                                                                                        )}
+                                                                                                    />
+                                                                                                </CommandItem>
+                                                                                            </CommandGroup>
+                                                                                        </CommandList>
+                                                                                    </Command>
+                                                                                </PopoverContent>
+                                                                            </Popover>
+                                                                            {countryOther ? (
+                                                                                <Input
+                                                                                    value={
+                                                                                        countryOther ===
+                                                                                        'Other'
+                                                                                            ? ''
+                                                                                            : countryOther
+                                                                                    }
+                                                                                    onChange={(
+                                                                                        event,
+                                                                                    ) => {
+                                                                                        setCountryOther(
+                                                                                            event
+                                                                                                .target
+                                                                                                .value,
+                                                                                        );
+                                                                                        setDynamicValue(
+                                                                                            programme.id,
+                                                                                            field.id,
+                                                                                            event
+                                                                                                .target
+                                                                                                .value
+                                                                                                ? `Other: ${event.target.value}`
+                                                                                                : 'Other',
+                                                                                        );
+                                                                                    }}
+                                                                                    placeholder="Please specify country"
+                                                                                    className={
+                                                                                        inputClass
+                                                                                    }
+                                                                                />
+                                                                            ) : null}
+                                                                            <InputError
+                                                                                message={
+                                                                                    fieldError
+                                                                                }
+                                                                            />
+                                                                        </div>
+                                                                    );
+                                                                }
+
+                                                                return (
+                                                                    <div
+                                                                        key={
+                                                                            field.id
+                                                                        }
+                                                                        data-error-key={
+                                                                            fieldErrorKey
+                                                                        }
+                                                                        className="grid gap-2"
+                                                                    >
+                                                                        <Label>
+                                                                            {
+                                                                                field.label
+                                                                            }
+                                                                            {field.is_required ? (
+                                                                                <span className="text-[11px] font-semibold text-red-600">
+                                                                                    {' '}
+                                                                                    *
+                                                                                </span>
+                                                                            ) : null}
+                                                                        </Label>
+
+                                                                        {field.field_type ===
+                                                                        'textarea' ? (
+                                                                            <textarea
+                                                                                value={
+                                                                                    stringValue
+                                                                                }
+                                                                                onChange={(
+                                                                                    event,
+                                                                                ) =>
+                                                                                    setDynamicValue(
+                                                                                        programme.id,
+                                                                                        field.id,
+                                                                                        event
+                                                                                            .target
+                                                                                            .value,
+                                                                                    )
+                                                                                }
+                                                                                placeholder={
+                                                                                    field.placeholder ??
+                                                                                    undefined
+                                                                                }
+                                                                                className={cn(
+                                                                                    inputClass,
+                                                                                    'min-h-[96px] py-2',
+                                                                                )}
+                                                                            />
+                                                                        ) : null}
+
+                                                                        {[
+                                                                            'text',
+                                                                            'email',
+                                                                            'tel',
+                                                                            'date',
+                                                                        ].includes(
+                                                                            field.field_type,
+                                                                        ) ? (
+                                                                            <Input
+                                                                                type={
+                                                                                    field.field_type ===
+                                                                                    'tel'
+                                                                                        ? 'tel'
+                                                                                        : field.field_type
+                                                                                }
+                                                                                value={
+                                                                                    stringValue
+                                                                                }
+                                                                                onChange={(
+                                                                                    event,
+                                                                                ) =>
+                                                                                    setDynamicValue(
+                                                                                        programme.id,
+                                                                                        field.id,
+                                                                                        event
+                                                                                            .target
+                                                                                            .value,
+                                                                                    )
+                                                                                }
+                                                                                placeholder={
+                                                                                    field.placeholder ??
+                                                                                    undefined
+                                                                                }
+                                                                                className={
+                                                                                    inputClass
+                                                                                }
+                                                                            />
+                                                                        ) : null}
+
+                                                                        {isAsemme10ConsentField ? (
+                                                                            <label className="flex items-start gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm">
+                                                                                <Checkbox
+                                                                                    checked={
+                                                                                        !!stringValue
+                                                                                    }
+                                                                                    onCheckedChange={(
+                                                                                        checked,
+                                                                                    ) =>
+                                                                                        setDynamicValue(
+                                                                                            programme.id,
+                                                                                            field.id,
+                                                                                            checked
+                                                                                                ? (field
+                                                                                                      .options?.[0] ??
+                                                                                                      'Yes')
+                                                                                                : '',
+                                                                                        )
+                                                                                    }
+                                                                                />
+                                                                                <span>
+                                                                                    {field
+                                                                                        .options?.[0] ??
+                                                                                        'Yes'}
+                                                                                </span>
+                                                                            </label>
+                                                                        ) : null}
+
+                                                                        {field.field_type ===
+                                                                            'radio' &&
+                                                                        !isAsemme10ConsentField ? (
+                                                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                                                {(
+                                                                                    field.options ??
+                                                                                    []
+                                                                                ).map(
+                                                                                    (
+                                                                                        option,
+                                                                                    ) => (
+                                                                                        <label
+                                                                                            key={
+                                                                                                option
+                                                                                            }
+                                                                                            className="flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm"
+                                                                                        >
+                                                                                            <input
+                                                                                                type="radio"
+                                                                                                name={`dynamic-${programme.id}-${field.id}`}
+                                                                                                checked={
+                                                                                                    stringValue ===
+                                                                                                    option
+                                                                                                }
+                                                                                                onChange={() =>
+                                                                                                    setDynamicValue(
+                                                                                                        programme.id,
+                                                                                                        field.id,
+                                                                                                        option,
+                                                                                                    )
+                                                                                                }
+                                                                                            />
+                                                                                            <span>
+                                                                                                {
+                                                                                                    option
+                                                                                                }
+                                                                                            </span>
+                                                                                        </label>
+                                                                                    ),
+                                                                                )}
+                                                                            </div>
+                                                                        ) : null}
+
+                                                                        {field.field_type ===
+                                                                        'checkbox' ? (
+                                                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                                                {(
+                                                                                    field.options ??
+                                                                                    []
+                                                                                ).map(
+                                                                                    (
+                                                                                        option,
+                                                                                    ) => {
+                                                                                        const checkedValues =
+                                                                                            Array.isArray(
+                                                                                                value,
+                                                                                            )
+                                                                                                ? value
+                                                                                                : [];
+
+                                                                                        return (
+                                                                                            <label
+                                                                                                key={
+                                                                                                    option
+                                                                                                }
+                                                                                                className="flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm"
+                                                                                            >
+                                                                                                <Checkbox
+                                                                                                    checked={checkedValues.includes(
+                                                                                                        option,
+                                                                                                    )}
+                                                                                                    onCheckedChange={(
+                                                                                                        checked,
+                                                                                                    ) =>
+                                                                                                        toggleDynamicCheckbox(
+                                                                                                            programme.id,
+                                                                                                            field.id,
+                                                                                                            option,
+                                                                                                            Boolean(
+                                                                                                                checked,
+                                                                                                            ),
+                                                                                                        )
+                                                                                                    }
+                                                                                                />
+                                                                                                <span>
+                                                                                                    {
+                                                                                                        option
+                                                                                                    }
+                                                                                                </span>
+                                                                                            </label>
+                                                                                        );
+                                                                                    },
+                                                                                )}
+                                                                            </div>
+                                                                        ) : null}
+
+                                                                        {field.field_type ===
+                                                                        'select' ? (
+                                                                            <Popover
+                                                                                open={
+                                                                                    dynamicSelectOpen[
+                                                                                        `${programme.id}-${field.id}`
+                                                                                    ] ??
+                                                                                    false
+                                                                                }
+                                                                                onOpenChange={(
+                                                                                    open,
+                                                                                ) =>
+                                                                                    setDynamicSelectOpen(
+                                                                                        (
+                                                                                            current,
+                                                                                        ) => ({
+                                                                                            ...current,
+                                                                                            [`${programme.id}-${field.id}`]:
+                                                                                                open,
+                                                                                        }),
+                                                                                    )
+                                                                                }
+                                                                            >
+                                                                                <PopoverTrigger
+                                                                                    asChild
+                                                                                >
+                                                                                    <Button
+                                                                                        type="button"
+                                                                                        variant="outline"
+                                                                                        role="combobox"
+                                                                                        className={
+                                                                                            comboboxTriggerClass
+                                                                                        }
+                                                                                    >
+                                                                                        <span className="truncate">
+                                                                                            {stringValue ||
+                                                                                                field.placeholder ||
+                                                                                                'Select an option...'}
+                                                                                        </span>
+                                                                                        <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                                                                                    </Button>
+                                                                                </PopoverTrigger>
+                                                                                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                                                                                    <Command>
+                                                                                        <CommandInput placeholder="Search options..." />
+                                                                                        <CommandList>
+                                                                                            <CommandEmpty>
+                                                                                                No
+                                                                                                option
+                                                                                                found.
+                                                                                            </CommandEmpty>
+                                                                                            <CommandGroup>
+                                                                                                {(
+                                                                                                    field.options ??
+                                                                                                    []
+                                                                                                ).map(
+                                                                                                    (
+                                                                                                        option,
+                                                                                                    ) => (
+                                                                                                        <CommandItem
+                                                                                                            key={
+                                                                                                                option
+                                                                                                            }
+                                                                                                            value={
+                                                                                                                option
+                                                                                                            }
+                                                                                                            onSelect={() => {
+                                                                                                                setDynamicValue(
+                                                                                                                    programme.id,
+                                                                                                                    field.id,
+                                                                                                                    option,
+                                                                                                                );
+                                                                                                                setDynamicSelectOpen(
+                                                                                                                    (
+                                                                                                                        current,
+                                                                                                                    ) => ({
+                                                                                                                        ...current,
+                                                                                                                        [`${programme.id}-${field.id}`]: false,
+                                                                                                                    }),
+                                                                                                                );
+                                                                                                            }}
+                                                                                                        >
+                                                                                                            <Check
+                                                                                                                className={cn(
+                                                                                                                    'mr-2 h-4 w-4',
+                                                                                                                    stringValue ===
+                                                                                                                        option
+                                                                                                                        ? 'opacity-100'
+                                                                                                                        : 'opacity-0',
+                                                                                                                )}
+                                                                                                            />
+                                                                                                            {
+                                                                                                                option
+                                                                                                            }
+                                                                                                        </CommandItem>
+                                                                                                    ),
+                                                                                                )}
+                                                                                            </CommandGroup>
+                                                                                        </CommandList>
+                                                                                    </Command>
+                                                                                </PopoverContent>
+                                                                            </Popover>
+                                                                        ) : null}
+
+                                                                        {isAsemme10Registration &&
+                                                                        fieldOtherSelected ? (
+                                                                            <div
+                                                                                className="grid gap-2"
+                                                                                data-error-key={dynamicOtherErrorKey(
+                                                                                    programme.id,
+                                                                                    field.id,
+                                                                                )}
+                                                                            >
+                                                                                <Label>
+                                                                                    Please
+                                                                                    specify
+                                                                                </Label>
+                                                                                <Input
+                                                                                    value={
+                                                                                        otherValue
+                                                                                    }
+                                                                                    onChange={(
+                                                                                        event,
+                                                                                    ) =>
+                                                                                        setDynamicOtherValue(
+                                                                                            programme.id,
+                                                                                            field.id,
+                                                                                            event
+                                                                                                .target
+                                                                                                .value,
+                                                                                        )
+                                                                                    }
+                                                                                    placeholder="Please specify"
+                                                                                    className={
+                                                                                        inputClass
+                                                                                    }
+                                                                                />
+                                                                                <InputError
+                                                                                    message={
+                                                                                        otherError
+                                                                                    }
+                                                                                />
+                                                                            </div>
+                                                                        ) : null}
+
+                                                                        {field.help_text ? (
+                                                                            <p className="text-xs text-slate-500">
+                                                                                {
+                                                                                    field.help_text
+                                                                                }
+                                                                            </p>
+                                                                        ) : null}
+                                                                        <InputError
+                                                                            message={
+                                                                                fieldError
+                                                                            }
+                                                                        />
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ),
+                                            )
+                                        ) : (
+                                            <div className="rounded-xl border border-slate-200/70 bg-white/70 p-3 text-sm text-slate-600 backdrop-blur">
+                                                No event-specific fields are
+                                                configured for your selected
+                                                event(s).
+                                            </div>
+                                        )}
+                                    </fieldset>
+
+                                    <fieldset
+                                        data-active={currentStep === 4}
+                                        aria-hidden={currentStep !== 4}
+                                        className={cn(
+                                            'grid gap-3 text-left',
+                                            currentStep === 4 ? '' : 'hidden',
                                         )}
                                     >
                                         <div className="rounded-xl border border-slate-200/70 bg-white/70 p-3 backdrop-blur">
@@ -2875,13 +5355,22 @@ export default function Register({
                                             </Button>
                                         ) : (
                                             <Button
-                                                type="submit"
+                                                type={
+                                                    isAsemme10Registration
+                                                        ? 'button'
+                                                        : 'submit'
+                                                }
                                                 className="h-11 w-full rounded-xl bg-[#0033A0] text-white shadow-sm hover:bg-[#002b86] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                                                 tabIndex={9}
-                                                disabled={processing}
+                                                disabled={effectiveProcessing}
                                                 data-test="register-user-button"
+                                                onClick={
+                                                    isAsemme10Registration
+                                                        ? submitCurrentRegistration
+                                                        : undefined
+                                                }
                                             >
-                                                {processing ? (
+                                                {effectiveProcessing ? (
                                                     <>
                                                         <Loader2
                                                             className="h-4 w-4 animate-spin"
@@ -2895,7 +5384,7 @@ export default function Register({
                                             </Button>
                                         )}
                                     </div>
-                                    {processing && (
+                                    {effectiveProcessing && (
                                         <p
                                             className="text-center text-sm text-slate-500"
                                             role="status"
@@ -2916,9 +5405,245 @@ export default function Register({
                             </div>
 
                             <Dialog
+                                open={cropDialogOpen}
+                                onOpenChange={setCropDialogOpen}
+                            >
+                                <DialogContent className="w-[calc(100%-2rem)] max-w-xl rounded-2xl bg-white text-slate-900 sm:w-full">
+                                    <DialogHeader>
+                                        <DialogTitle>
+                                            Crop preferred image
+                                        </DialogTitle>
+                                        <DialogDescription>
+                                            Resize and position the circle crop
+                                            for your virtual ID photo.
+                                        </DialogDescription>
+                                    </DialogHeader>
+
+                                    {cropImageSrc ? (
+                                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                            <ReactCrop
+                                                crop={crop}
+                                                aspect={1}
+                                                circularCrop
+                                                minWidth={120}
+                                                onChange={(_, percentCrop) =>
+                                                    setCrop(percentCrop)
+                                                }
+                                                onComplete={(pixelCrop) =>
+                                                    setCompletedCrop(pixelCrop)
+                                                }
+                                                className="max-h-[60vh]"
+                                            >
+                                                <img
+                                                    ref={cropImageRef}
+                                                    src={cropImageSrc}
+                                                    alt="Selected preferred ID"
+                                                    className="max-h-[56vh] w-full object-contain"
+                                                    onLoad={(event) => {
+                                                        const {
+                                                            width,
+                                                            height,
+                                                        } = event.currentTarget;
+
+                                                        setCrop(
+                                                            getCenteredCircleCrop(
+                                                                width,
+                                                                height,
+                                                            ),
+                                                        );
+                                                        setCompletedCrop(
+                                                            undefined,
+                                                        );
+                                                    }}
+                                                />
+                                            </ReactCrop>
+                                        </div>
+                                    ) : null}
+
+                                    <DialogFooter>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() =>
+                                                setCropDialogOpen(false)
+                                            }
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            className="bg-[#0033A0] text-white hover:bg-[#002b86]"
+                                            onClick={
+                                                handleUseCroppedPreferredImage
+                                            }
+                                        >
+                                            Use image
+                                        </Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+
+                            <Dialog
                                 open={successOpen}
                                 onOpenChange={setSuccessOpen}
                             >
+                                <DialogContent className="w-[calc(100%-2rem)] max-w-4xl rounded-2xl border-none bg-white text-slate-900 sm:w-full">
+                                    <DialogHeader className="items-center text-center">
+                                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0033A0] text-white shadow-lg shadow-[#0033A0]/20">
+                                            <CheckCircle2 className="h-7 w-7" />
+                                        </div>
+
+                                        <DialogTitle className="text-xl text-slate-800">
+                                            Registration successful
+                                        </DialogTitle>
+
+                                        <DialogDescription className="text-sm text-slate-600">
+                                            {asemme10Submission
+                                                ? 'Your ASEMME10 registration was submitted.'
+                                                : 'Your virtual participant ID is ready. A copy was also sent to your email.'}
+                                            <span className="mt-2 block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                                                <span className="font-semibold">
+                                                    Please check your EMAIL.
+                                                </span>{' '}
+                                                Also check your{' '}
+                                                <span className="font-semibold">
+                                                    Spam/Junk
+                                                </span>{' '}
+                                                folder if you do not see it.
+                                            </span>
+                                        </DialogDescription>
+                                    </DialogHeader>
+
+                                    {asemme10Submission ? (
+                                        <div className="mx-auto w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                            <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                                                Registered participants
+                                            </p>
+                                            <div className="mt-3 grid gap-2">
+                                                {asemme10Submission.participants.map(
+                                                    (participant) => (
+                                                        <div
+                                                            key={
+                                                                participant.display_id
+                                                            }
+                                                            className="rounded-lg border border-slate-200 px-3 py-2"
+                                                        >
+                                                            <p className="font-semibold text-slate-800">
+                                                                {
+                                                                    participant.name
+                                                                }
+                                                            </p>
+                                                            <p className="text-sm text-slate-500">
+                                                                {
+                                                                    participant.display_id
+                                                                }
+                                                            </p>
+                                                        </div>
+                                                    ),
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : null}
+
+                                    {registeredParticipant ? (
+                                        <div className="mx-auto w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                                <div className="bg-[#0033A0] px-5 py-4 text-white">
+                                                    <p className="text-xs font-semibold tracking-[0.18em] uppercase">
+                                                        Virtual Participant ID
+                                                    </p>
+                                                    <p className="mt-1 text-lg font-semibold">
+                                                        {registeredParticipant.event_title ??
+                                                            activeProgramme?.title ??
+                                                            'Registration Event'}
+                                                    </p>
+                                                </div>
+
+                                                <div className="grid gap-4 p-5 sm:grid-cols-[1fr_220px]">
+                                                    <div className="min-w-0">
+                                                        <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                                                            Participant
+                                                        </p>
+                                                        <p className="mt-1 text-2xl font-bold break-words text-slate-900">
+                                                            {
+                                                                registeredParticipant.name
+                                                            }
+                                                        </p>
+                                                        <p className="mt-2 text-sm break-words text-slate-600">
+                                                            {
+                                                                registeredParticipant.email
+                                                            }
+                                                        </p>
+
+                                                        <div className="mt-5 inline-flex rounded-lg border border-[#0033A0]/20 bg-[#0033A0]/5 px-3 py-2">
+                                                            <div>
+                                                                <p className="text-[11px] font-semibold tracking-wide text-[#0033A0] uppercase">
+                                                                    Participant
+                                                                    ID
+                                                                </p>
+                                                                <p className="text-lg font-bold text-[#0033A0]">
+                                                                    {
+                                                                        registeredParticipant.display_id
+                                                                    }
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3">
+                                                        {successQrDataUrl ? (
+                                                            <img
+                                                                src={
+                                                                    successQrDataUrl
+                                                                }
+                                                                alt="Participant QR code"
+                                                                className="h-44 w-44 bg-white"
+                                                            />
+                                                        ) : (
+                                                            <div className="grid h-44 w-44 place-items-center bg-white text-sm text-slate-500">
+                                                                Generating QR...
+                                                            </div>
+                                                        )}
+                                                        <p className="mt-2 text-center text-xs font-medium text-slate-500">
+                                                            Present this at
+                                                            check-in.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : null}
+
+                                    <DialogFooter className="gap-2 sm:justify-center">
+                                        {registeredParticipant ? (
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="rounded-full px-6"
+                                                onClick={downloadVirtualId}
+                                                disabled={!successQrDataUrl}
+                                            >
+                                                <Download className="h-4 w-4" />
+                                                Download JPG
+                                            </Button>
+                                        ) : null}
+                                        <Button
+                                            type="button"
+                                            className="rounded-full bg-[#0033A0] px-6 text-white hover:bg-[#002b86] disabled:cursor-not-allowed disabled:opacity-60"
+                                            onClick={() => {
+                                                setSuccessOpen(false);
+                                                if (!asemme10Submission) {
+                                                    router.visit(login());
+                                                }
+                                            }}
+                                        >
+                                            Got it
+                                        </Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+
+                            <Dialog open={false} onOpenChange={setSuccessOpen}>
                                 <DialogContent className="w-[calc(100%-2rem)] max-w-3xl rounded-2xl border-none bg-gradient-to-br from-[#E8F0FF] via-white to-[#F5FBFF] sm:w-full">
                                     <DialogHeader className="items-center text-center">
                                         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0033A0] text-white shadow-lg shadow-[#0033A0]/20">

@@ -88,6 +88,7 @@ type DashboardEvent = {
     title: string;
     starts_at: string | null;
     ends_at: string | null;
+    is_registration_active?: boolean;
     attendance_count: number;
     joined_count: number;
     joined_by_country: Record<string, number>;
@@ -119,6 +120,7 @@ type PageProps = {
     };
     country_stats: Record<string, { participants: number; scans: number }>;
     events: DashboardEvent[];
+    default_event_id?: number | null;
     line_data: LineDatum[];
     feedback: {
         total: number;
@@ -277,7 +279,9 @@ export default function Dashboard() {
     const [open, setOpen] = React.useState(false);
     const [eventOpen, setEventOpen] = React.useState(false);
     const [country, setCountry] = React.useState<string | null>(null);
-    const [eventFilter, setEventFilter] = React.useState<string | null>(null);
+    const [eventFilter, setEventFilter] = React.useState<string | null>(() =>
+        props.default_event_id ? String(props.default_event_id) : null,
+    );
     const [attendanceOpen, setAttendanceOpen] = React.useState(false);
     const [selectedEvent, setSelectedEvent] = React.useState<
         (DashboardEvent & { participants: EventParticipant[] }) | null
@@ -535,6 +539,20 @@ export default function Dashboard() {
                 Filtered
             </Badge>
         ) : null;
+    const participantHint = eventFilterEvent ? (
+        current ? (
+            'Selected event and country'
+        ) : (
+            'Selected event'
+        )
+    ) : (
+        <span>
+            Overall:{' '}
+            <span className="font-medium text-foreground">
+                {stats.participants_total.toLocaleString()}
+            </span>
+        </span>
+    );
 
     const selectedParticipants = selectedEvent?.participants ?? [];
     const selectedEventDate = selectedEvent?.starts_at
@@ -917,14 +935,7 @@ export default function Dashboard() {
                         value={filteredParticipants.toLocaleString()}
                         icon={Users}
                         badge={currentBadge}
-                        hint={
-                            <span>
-                                Overall:{' '}
-                                <span className="font-medium text-foreground">
-                                    {stats.participants_total.toLocaleString()}
-                                </span>
-                            </span>
-                        }
+                        hint={participantHint}
                         tint="bg-gradient-to-br from-sky-500/15 via-transparent to-indigo-500/10"
                     />
 

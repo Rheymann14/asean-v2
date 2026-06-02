@@ -58,6 +58,7 @@ type EventRow = {
     starts_at?: string | null;
     ends_at?: string | null;
     is_active: boolean;
+    is_registration_active?: boolean;
 };
 
 type ReportRow = {
@@ -92,6 +93,7 @@ type PageProps = {
     summary: Summary;
     rows: ReportRow[];
     events: EventRow[];
+    default_event_id?: number | null;
     now_iso?: string | null;
 };
 
@@ -237,11 +239,18 @@ function getVehiclePlateNumber(
     return row.vehicle_plate_number;
 }
 
-export default function Reports({ summary, rows, events, now_iso }: PageProps) {
+export default function Reports({
+    summary,
+    rows,
+    events,
+    default_event_id,
+    now_iso,
+}: PageProps) {
     const [search, setSearch] = React.useState('');
     const [currentPage, setCurrentPage] = React.useState(1);
-    const [selectedEvent, setSelectedEvent] =
-        React.useState<string>(ALL_EVENTS_VALUE);
+    const [selectedEvent, setSelectedEvent] = React.useState<string>(() =>
+        default_event_id ? String(default_event_id) : ALL_EVENTS_VALUE,
+    );
     const [eventsOpen, setEventsOpen] = React.useState(false);
     const [checkinSort, setCheckinSort] = React.useState<CheckinSort>('desc');
     const [registrantTypeSort, setRegistrantTypeSort] =

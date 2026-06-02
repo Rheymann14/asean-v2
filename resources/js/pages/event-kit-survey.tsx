@@ -35,6 +35,7 @@ type ProgrammeRow = {
     starts_at: string | null;
     ends_at: string | null;
     location: string | null;
+    is_registration_active?: boolean;
 };
 
 type AttendanceEntry = {

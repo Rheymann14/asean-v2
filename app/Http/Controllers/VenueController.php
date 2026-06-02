@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Programme;
 use App\Models\VenueSection;
 use App\Models\Venue;
+use App\Support\EventDefaults;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -12,14 +13,18 @@ class VenueController extends Controller
 {
     public function index()
     {
-        $programmes = Programme::query()
+        $programmeEvents = Programme::query()
             ->latest('starts_at')
-            ->get()
+            ->get();
+        $defaultEventId = EventDefaults::defaultEventId($programmeEvents);
+
+        $programmes = $programmeEvents
             ->map(fn (Programme $programme) => [
                 'id' => $programme->id,
                 'title' => $programme->title,
                 'starts_at' => $programme->starts_at?->toISOString(),
                 'ends_at' => $programme->ends_at?->toISOString(),
+                'is_registration_active' => $programme->is_registration_active,
             ]);
 
         $venues = Venue::query()
@@ -48,6 +53,7 @@ class VenueController extends Controller
         return Inertia::render('venue-management', [
             'programmes' => $programmes,
             'venues' => $venues,
+            'default_event_id' => $defaultEventId ?: null,
         ]);
     }
 

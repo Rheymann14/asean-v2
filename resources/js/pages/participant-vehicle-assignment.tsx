@@ -22,6 +22,7 @@ type EventRow = {
     starts_at?: string | null;
     ends_at?: string | null;
     location?: string | null;
+    is_registration_active?: boolean;
     vehicle_assignment?: VehicleAssignment | null;
 };
 
@@ -224,7 +225,11 @@ function Section({
 
 export default function ParticipantVehicleAssignment({ events = [] }: PageProps) {
     const [nowTs] = React.useState(() => new Date().getTime());
-    const [filterId, setFilterId] = React.useState('all');
+    const [filterId, setFilterId] = React.useState(
+        () =>
+            events.find((event) => event.is_registration_active)?.id.toString() ??
+            'all',
+    );
     const [open, setOpen] = React.useState(false);
 
     const eventsWithPhase = React.useMemo(

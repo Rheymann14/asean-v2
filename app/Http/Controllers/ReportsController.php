@@ -9,6 +9,7 @@ use App\Models\Programme;
 use App\Models\User;
 use App\Models\UserType;
 use App\Models\VehicleAssignment;
+use App\Support\EventDefaults;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -222,15 +223,19 @@ Please be informed of the following:
             });
         };
 
-        $events = Programme::query()
+        $programmeEvents = Programme::query()
             ->orderBy('starts_at')
-            ->get()
+            ->get();
+        $defaultEventId = EventDefaults::defaultEventId($programmeEvents);
+
+        $events = $programmeEvents
             ->map(fn (Programme $programme) => [
                 'id' => $programme->id,
                 'title' => $programme->title,
                 'starts_at' => $programme->starts_at?->toISOString(),
                 'ends_at' => $programme->ends_at?->toISOString(),
                 'is_active' => (bool) $programme->is_active,
+                'is_registration_active' => (bool) $programme->is_registration_active,
             ])
             ->values();
 
@@ -427,6 +432,7 @@ Please be informed of the following:
             ],
             'rows' => $rows,
             'events' => $events,
+            'default_event_id' => $defaultEventId ?: null,
             'now_iso' => now()->toISOString(),
         ]);
     }

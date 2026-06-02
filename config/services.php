@@ -49,4 +49,9 @@ return [
         'sender_name' => env('BREVO_SENDER_NAME', 'ASEAN PH 2026'),
     ],
 
+    'registration' => [
+        'public_event_id' => env('PUBLIC_REGISTRATION_EVENT_ID', env('ASEMME10_EVENT_ID')),
+        'welcome_dinner_enabled' => env('WELCOME_DINNER_REGISTRATION_ENABLED', false),
+    ],
+
 ];

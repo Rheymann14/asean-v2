@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
+import { Toaster } from '@/components/ui/sonner';
 
 type RegisterLayoutProps = {
     children: React.ReactNode;
@@ -27,6 +28,7 @@ export default function RegisterLayout({ children }: RegisterLayoutProps) {
             <main className="relative z-10 mx-auto flex w-full max-w-4xl flex-col px-4 py-10 sm:px-6 lg:px-8">
                 {children}
             </main>
+            <Toaster richColors position="top-right" closeButton duration={5000} />
         </div>
     );
 }

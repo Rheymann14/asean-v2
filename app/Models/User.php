@@ -19,6 +19,7 @@ use App\Models\Issuance;
 use App\Models\Programme;
 use App\Models\ParticipantTableAssignment;
 use App\Models\ActivityLog;
+use App\Models\RegistrationFieldResponse;
 
 class User extends Authenticatable
 {
@@ -152,5 +153,10 @@ class User extends Authenticatable
     public function activityLogs(): HasMany
     {
         return $this->hasMany(ActivityLog::class);
+    }
+
+    public function registrationFieldResponses(): HasMany
+    {
+        return $this->hasMany(RegistrationFieldResponse::class);
     }
 }

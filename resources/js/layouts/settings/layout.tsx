@@ -2,8 +2,8 @@ import Heading from '@/components/heading';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn, isSameUrl, resolveUrl } from '@/lib/utils';
-import { edit as editAppearance } from '@/routes/appearance';
 import { index as activityLog } from '@/routes/activity-log';
+import { edit as editAppearance } from '@/routes/appearance';
 import { edit } from '@/routes/profile';
 import { show } from '@/routes/two-factor';
 import { edit as editPassword } from '@/routes/user-password';
@@ -60,6 +60,7 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
     ];
 
     const currentPath = window.location.pathname;
+    const itemHref = (item: NavItem) => item.href ?? '#';
 
     return (
         <div className="px-4 py-6">
@@ -73,18 +74,18 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
                     <nav className="flex flex-col space-y-1 space-x-0">
                         {sidebarNavItems.map((item, index) => (
                             <Button
-                                key={`${resolveUrl(item.href)}-${index}`}
+                                key={`${resolveUrl(itemHref(item))}-${index}`}
                                 size="sm"
                                 variant="ghost"
                                 asChild
                                 className={cn('w-full justify-start', {
                                     'bg-muted': isSameUrl(
                                         currentPath,
-                                        item.href,
+                                        itemHref(item),
                                     ),
                                 })}
                             >
-                                <Link href={item.href}>
+                                <Link href={itemHref(item)}>
                                     {item.icon && (
                                         <item.icon className="h-4 w-4" />
                                     )}

@@ -21,7 +21,7 @@
                            <tr>
                             <td style="padding: 0 28px 18px;">
                                 <h1 style="margin: 0 0 10px; font-size: 20px; line-height: 1.3; color: #0f172a;">
-                                    Thank you for registering for the CHED-Hosted Welcome Dinner. Your registration is confirmed.
+                                    Thank you for registering for {{ $primaryEventTitle }}. Your registration is confirmed.
                                 </h1>
                                 <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: #475569;">
                                     Please log in to the registration portal to access your QR code, which will serve as your entry pass to the event.

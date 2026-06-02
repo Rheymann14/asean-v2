@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ParticipantAttendance;
 use App\Models\Programme;
 use App\Models\User;
+use App\Support\EventDefaults;
 use Carbon\Carbon;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
@@ -27,14 +28,16 @@ class ScannerController extends Controller
                     'starts_at' => $programme->starts_at?->toISOString(),
                     'ends_at' => $programme->ends_at?->toISOString(),
                     'is_active' => $programme->is_active,
+                    'is_registration_active' => $programme->is_registration_active,
                     'phase' => $this->resolvePhase($programme, $now),
                 ];
             })
             ->values();
 
-        $defaultEventId = $programmes->firstWhere('phase', 'ongoing')['id']
-            ?? $programmes->firstWhere('phase', 'upcoming')['id']
-            ?? null;
+        $defaultEventId = EventDefaults::defaultEventId(
+            $programmes,
+            fn ($events) => $events->firstWhere('phase', 'ongoing') ?? $events->firstWhere('phase', 'upcoming'),
+        ) ?: null;
 
         return Inertia::render('scanner', [
             'events' => $programmes,

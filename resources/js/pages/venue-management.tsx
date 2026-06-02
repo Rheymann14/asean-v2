@@ -67,6 +67,7 @@ type ProgrammeRow = {
     title: string;
     starts_at?: string | null;
     ends_at?: string | null;
+    is_registration_active?: boolean;
 };
 
 type VenueRow = {
@@ -86,6 +87,7 @@ type VenueRow = {
 type PageProps = {
     programmes?: ProgrammeRow[];
     venues?: VenueRow[];
+    default_event_id?: number | null;
 };
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Venue Management', href: '/venue-management' }];
@@ -361,7 +363,9 @@ export default function VenueManagement(props: PageProps) {
 
 
     const [q, setQ] = React.useState('');
-    const [eventFilter, setEventFilter] = React.useState<string>('all');
+    const [eventFilter, setEventFilter] = React.useState<string>(() =>
+        props.default_event_id ? String(props.default_event_id) : 'all',
+    );
     const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'inactive'>('all');
 
     const filtered = React.useMemo(() => {

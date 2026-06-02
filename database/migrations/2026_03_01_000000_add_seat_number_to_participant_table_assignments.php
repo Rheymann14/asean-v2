@@ -14,12 +14,15 @@ return new class extends Migration
         });
 
         DB::statement(<<<'SQL'
-            UPDATE participant_table_assignments pta
-            JOIN (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY participant_table_id ORDER BY assigned_at, id) AS seat_number
-                FROM participant_table_assignments
-            ) ranked ON ranked.id = pta.id
-            SET pta.seat_number = ranked.seat_number
+            UPDATE participant_table_assignments
+            SET seat_number = (
+                SELECT ranked.seat_number
+                FROM (
+                    SELECT id, ROW_NUMBER() OVER (PARTITION BY participant_table_id ORDER BY assigned_at, id) AS seat_number
+                    FROM participant_table_assignments
+                ) ranked
+                WHERE ranked.id = participant_table_assignments.id
+            )
         SQL
         );
 
@@ -37,4 +40,3 @@ return new class extends Migration
         });
     }
 };
-

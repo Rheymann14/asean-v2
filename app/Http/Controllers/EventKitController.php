@@ -6,6 +6,7 @@ use App\Models\ParticipantAttendance;
 use App\Models\Programme;
 use App\Models\Feedback;
 use App\Models\User;
+use App\Support\EventDefaults;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -77,13 +78,22 @@ class EventKitController extends Controller
             ->map(fn ($id) => (int) $id)
             ->values()
             ->all();
+        $checkedInProgrammeIds = collect($attendanceEntries)
+            ->pluck('programme_id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+        $checkedInProgrammes = collect($programmes)
+            ->filter(fn (array $programme) => $checkedInProgrammeIds->contains((int) $programme['id']))
+            ->values();
+        $selectedProgrammeId = $request->session()->get('event_kit.programme_id')
+            ?: (EventDefaults::defaultEventId($checkedInProgrammes, fn ($events) => $events->first()) ?: null);
 
         return Inertia::render('event-kit-survey', [
             'participant' => $participant,
             'programmes' => $programmes,
             'attendance_entries' => $attendanceEntries,
             'joined_programme_ids' => $joinedProgrammeIds,
-            'selected_programme_id' => $request->session()->get('event_kit.programme_id'),
+            'selected_programme_id' => $selectedProgrammeId,
         ]);
     }
 
@@ -165,6 +175,7 @@ class EventKitController extends Controller
                 'starts_at' => $programme->starts_at?->toISOString(),
                 'ends_at' => $programme->ends_at?->toISOString(),
                 'location' => $programme->location,
+                'is_registration_active' => $programme->is_registration_active,
                 'materials' => $programme->materials
                     ->map(fn ($material) => [
                         'id' => $material->id,
@@ -182,7 +193,8 @@ class EventKitController extends Controller
             ->all();
 
         if ($checkedInProgrammeIds->isNotEmpty() && !$checkedInProgrammeIds->contains((int) $programmeId)) {
-            $programmeId = $checkedInProgrammeIds->first();
+            $activeCheckedInProgramme = collect($checkedInProgrammes)->firstWhere('is_registration_active', true);
+            $programmeId = $activeCheckedInProgramme['id'] ?? $checkedInProgrammeIds->first();
             $request->session()->put('event_kit.programme_id', $programmeId);
         }
 
@@ -291,6 +303,7 @@ class EventKitController extends Controller
                 'starts_at' => $programme->starts_at?->toISOString(),
                 'ends_at' => $programme->ends_at?->toISOString(),
                 'location' => $programme->location,
+                'is_registration_active' => $programme->is_registration_active,
             ])
             ->values()
             ->all();

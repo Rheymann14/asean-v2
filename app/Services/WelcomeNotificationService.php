@@ -49,7 +49,7 @@ class WelcomeNotificationService
 
         try {
             $mailable = new ParticipantWelcomeMail($user);
-            $subject = $mailable->envelope()->subject ?? 'Registration Confirmed: ASEAN Philippines 2026 (Higher Education Sector) | CHED-Hosted Welcome Dinner on February 12, 2025';
+            $subject = $mailable->envelope()->subject ?? 'Registration Confirmed: ASEAN Philippines 2026 Registration';
             $html = $this->minifyHtml(view('emails.participant-welcome-brevo', $mailable->data())->render());
 
             $payload = [

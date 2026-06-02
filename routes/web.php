@@ -22,6 +22,7 @@ use App\Http\Controllers\TableAssignmentController;
 use App\Http\Controllers\EventKitController;
 use App\Http\Controllers\VehicleAssignmentController;
 use App\Http\Controllers\TransportVehicleController;
+use App\Http\Controllers\Asemme10RegistrationController;
 
 
 use App\Http\Controllers\BrevoTestController;
@@ -43,6 +44,9 @@ Route::middleware(['auth'])->group(function () {
 
 
 Route::post('/feedback', [FeedbackController::class, 'store'])->name('feedback.store');
+Route::post('/asemme10-registration', [Asemme10RegistrationController::class, 'store'])
+    ->middleware('throttle:10,1')
+    ->name('asemme10-registration.store');
 
 Route::get('/contact-us', [ContactDetailController::class, 'publicIndex'])->name('contact-us');
 
@@ -133,6 +137,8 @@ Route::get('/issuances', [IssuanceController::class, 'publicIndex'])->name('issu
         Route::get('participant', [ParticipantController::class, 'index'])->name('participant');
 
         Route::resource('participants', ParticipantController::class)->only(['store', 'update', 'destroy']);
+        Route::post('participants/asemme10-registration', [Asemme10RegistrationController::class, 'store'])
+            ->name('participants.asemme10-registration.store');
         Route::post('participants/{participant}/programmes/{programme}', [ParticipantController::class, 'joinProgramme'])
             ->name('participants.programmes.join');
         Route::delete('participants/{participant}/programmes/{programme}', [ParticipantController::class, 'leaveProgramme'])
@@ -168,6 +174,10 @@ Route::get('/issuances', [IssuanceController::class, 'publicIndex'])->name('issu
         Route::get('event-management', [ProgrammeController::class, 'index'])->name('event-management');
         Route::get('event-management/{programme}/participants', [ProgrammeController::class, 'participants'])
             ->name('event-management.participants');
+        Route::patch('programmes/{programme}/registration-fields', [ProgrammeController::class, 'updateRegistrationFields'])
+            ->name('programmes.registration-fields.update');
+        Route::patch('programmes/{programme}/active-registration', [ProgrammeController::class, 'activateRegistration'])
+            ->name('programmes.active-registration');
         Route::resource('programmes', ProgrammeController::class)->only(['store', 'update', 'destroy']);
 
 

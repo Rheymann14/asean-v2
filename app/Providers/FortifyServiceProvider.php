@@ -79,7 +79,8 @@ class FortifyServiceProvider extends ServiceProvider
     private function configureResponses(): void
     {
         $this->app->singleton(LoginResponse::class, function () {
-            return new class implements LoginResponse {
+            return new class implements LoginResponse
+            {
                 public function toResponse($request)
                 {
                     $user = $request->user();
@@ -87,7 +88,7 @@ class FortifyServiceProvider extends ServiceProvider
                     if ($user) {
                         $user->loadMissing('userType');
 
-                        $roleValue = (string) Str::of((string) ($user->userType->slug ?: $user->userType->name))
+                        $roleValue = (string) Str::of((string) ($user->userType?->slug ?: $user->userType?->name))
                             ->upper()
                             ->replace(['_', '-'], ' ')
                             ->trim();
@@ -111,14 +112,41 @@ class FortifyServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(RegisterResponse::class, function () {
-            return new class implements RegisterResponse {
+            return new class implements RegisterResponse
+            {
                 public function toResponse($request)
                 {
+                    $participant = $request->user();
+                    $participant?->loadMissing('joinedProgrammes');
+                    $requestedProgrammeIds = collect($request->input('programme_ids', []))
+                        ->map(fn ($id) => (int) $id)
+                        ->filter()
+                        ->all();
+                    $registeredEvent = $participant?->joinedProgrammes
+                        ?->when(
+                            ! empty($requestedProgrammeIds),
+                            fn ($programmes) => $programmes->whereIn('id', $requestedProgrammeIds),
+                        )
+                        ->sortBy('starts_at')
+                        ->first();
+
+                    $badge = $participant
+                        ? [
+                            'name' => $participant->name,
+                            'email' => $participant->email,
+                            'display_id' => $participant->display_id,
+                            'qr_payload' => $participant->qr_payload,
+                            'event_title' => $registeredEvent?->title,
+                        ]
+                        : null;
+
                     Auth::guard('web')->logout();
                     $request->session()->invalidate();
                     $request->session()->regenerateToken();
 
-                    return redirect('/register')->with('status', 'registered');
+                    return redirect('/register')
+                        ->with('status', 'registered')
+                        ->with('registeredParticipant', $badge);
                 }
             };
         });
@@ -148,8 +176,16 @@ class FortifyServiceProvider extends ServiceProvider
             'status' => $request->session()->get('status'),
         ]));
 
-        Fortify::registerView(fn (Request $request) => Inertia::render('auth/register', [
-            'countries' => Country::query()
+        Fortify::registerView(function (Request $request) {
+            $activeProgrammes = Programme::query()
+                ->where('is_active', true)
+                ->with('registrationFields')
+                ->orderByDesc('is_registration_active')
+                ->get();
+
+            $currentProgramme = $this->publicRegistrationProgramme($activeProgrammes);
+            $programmes = $currentProgramme ? collect([$currentProgramme]) : collect();
+            $countries = Country::query()
                 ->where('is_active', true)
                 ->orderBy('name')
                 ->get()
@@ -158,34 +194,31 @@ class FortifyServiceProvider extends ServiceProvider
                     'code' => $country->code,
                     'name' => $country->name,
                     'flag_url' => $country->flag_url,
-                ]),
-            'registrantTypes' => UserType::query()
-                ->where('is_active', true)
-                ->where('slug', '!=', 'admin')
-                ->where('name', '!=', 'Admin')
-                ->where('slug', '!=', 'ched')
-                ->where('name', '!=', 'CHED')
-                ->orderBy('sequence_order')
-                ->orderBy('id')
-                ->get()
-                ->map(fn (UserType $type) => [
-                    'id' => $type->id,
-                    'name' => $type->name,
-                    'slug' => $type->slug,
-                ]),
-            'programmes' => Programme::query()
-                ->where('is_active', true)
-                ->latest('starts_at')
-                ->get()
-                ->map(fn (Programme $programme) => [
-                    'id' => $programme->id,
-                    'title' => $programme->title,
-                    'description' => $programme->description,
-                    'starts_at' => $programme->starts_at?->toISOString(),
-                    'ends_at' => $programme->ends_at?->toISOString(),
-                ]),
-            'status' => $request->session()->get('status'),
-        ]));
+                ]);
+
+            return Inertia::render('auth/register', [
+                'countries' => $countries,
+                'registrantTypes' => UserType::query()
+                    ->where('is_active', true)
+                    ->where('slug', '!=', 'admin')
+                    ->where('name', '!=', 'Admin')
+                    ->where('slug', '!=', 'ched')
+                    ->where('name', '!=', 'CHED')
+                    ->orderBy('sequence_order')
+                    ->orderBy('id')
+                    ->get()
+                    ->map(fn (UserType $type) => [
+                        'id' => $type->id,
+                        'name' => $type->name,
+                        'slug' => $type->slug,
+                    ]),
+                'programmes' => $programmes->map(fn (Programme $programme) => $this->registrationProgrammePayload($programme))->values(),
+                'activeProgramme' => $currentProgramme ? $this->registrationProgrammePayload($currentProgramme) : null,
+                'registeredParticipant' => $request->session()->get('registeredParticipant'),
+                'asemme10Submission' => $request->session()->get('asemme10Submission'),
+                'status' => $request->session()->get('status'),
+            ]);
+        });
 
         Fortify::twoFactorChallengeView(fn () => Inertia::render('auth/two-factor-challenge'));
 
@@ -206,5 +239,121 @@ class FortifyServiceProvider extends ServiceProvider
 
             return Limit::perMinute(5)->by($throttleKey);
         });
+    }
+
+    private function publicRegistrationProgramme($programmes): ?Programme
+    {
+        $activeRegistrationProgramme = $programmes->firstWhere('is_registration_active', true);
+
+        if ($activeRegistrationProgramme) {
+            return $activeRegistrationProgramme;
+        }
+
+        $configuredEventId = (int) config('services.registration.public_event_id', 0);
+
+        if ($configuredEventId > 0) {
+            $configuredProgramme = $programmes->firstWhere('id', $configuredEventId);
+
+            if ($configuredProgramme) {
+                return $configuredProgramme;
+            }
+        }
+
+        $asemme10 = $programmes->first(fn (Programme $programme) => $this->isAsemme10Programme($programme));
+
+        if ($asemme10) {
+            return $asemme10;
+        }
+
+        $publicProgrammes = $programmes->reject(function (Programme $programme) {
+            return ! config('services.registration.welcome_dinner_enabled', false)
+                && $this->isWelcomeDinnerProgramme($programme);
+        });
+
+        return $this->nearestOpenProgramme($publicProgrammes);
+    }
+
+    private function nearestOpenProgramme($programmes): ?Programme
+    {
+        $today = now()->startOfDay();
+
+        return $programmes
+            ->map(function (Programme $programme) use ($today) {
+                $startsAt = $programme->starts_at?->copy()->startOfDay();
+                $endsAt = $programme->ends_at?->copy()->startOfDay();
+
+                if (! $startsAt) {
+                    return ['programme' => $programme, 'priority' => 2, 'distance' => PHP_INT_MAX];
+                }
+
+                $isClosed = $endsAt
+                    ? $today->greaterThan($endsAt)
+                    : $today->greaterThan($startsAt);
+
+                if ($isClosed) {
+                    return null;
+                }
+
+                $isOngoing = $today->greaterThanOrEqualTo($startsAt)
+                    && (! $endsAt || $today->lessThanOrEqualTo($endsAt));
+
+                return [
+                    'programme' => $programme,
+                    'priority' => $isOngoing ? 0 : 1,
+                    'distance' => abs($today->diffInDays($startsAt, false)),
+                ];
+            })
+            ->filter()
+            ->sortBy([
+                ['priority', 'asc'],
+                ['distance', 'asc'],
+            ])
+            ->pluck('programme')
+            ->first();
+    }
+
+    private function isAsemme10Programme(Programme $programme): bool
+    {
+        $value = Str::lower(trim("{$programme->tag} {$programme->title}"));
+
+        return Str::contains($value, [
+            'asemme10',
+            'asemme 10',
+            'asia-europe meeting of ministers for education',
+            '10th asia-europe meeting',
+        ]);
+    }
+
+    private function isWelcomeDinnerProgramme(Programme $programme): bool
+    {
+        $value = Str::lower(trim("{$programme->tag} {$programme->title}"));
+
+        return Str::contains($value, 'welcome dinner');
+    }
+
+    private function registrationProgrammePayload(Programme $programme): array
+    {
+        return [
+            'id' => $programme->id,
+            'title' => $programme->title,
+            'description' => $programme->description,
+            'starts_at' => $programme->starts_at?->toISOString(),
+            'ends_at' => $programme->ends_at?->toISOString(),
+            'is_registration_active' => $programme->is_registration_active,
+            'registration_fields' => $programme->registrationFields
+                ->map(fn ($field) => [
+                    'id' => $field->id,
+                    'field_key' => $field->field_key,
+                    'label' => $field->label,
+                    'field_type' => $field->field_type,
+                    'options' => $field->options ?? [],
+                    'placeholder' => $field->placeholder,
+                    'help_text' => $field->help_text,
+                    'is_required' => $field->is_required,
+                    'sort_order' => $field->sort_order,
+                ])
+                ->values()
+                ->all(),
+        ];
     }
 }

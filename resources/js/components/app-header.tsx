@@ -9,8 +9,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
     NavigationMenu,
+    NavigationMenuContent,
     NavigationMenuItem,
+    NavigationMenuLink,
     NavigationMenuList,
+    NavigationMenuTrigger,
     navigationMenuTriggerStyle,
 } from '@/components/ui/navigation-menu';
 import {
@@ -63,7 +66,14 @@ export function AppHeader({ breadcrumbs = [] }: AppHeaderProps) {
     const roleName = (userType?.name ?? '').toUpperCase();
     const roleSlug = (userType?.slug ?? '').toUpperCase();
     const roleValue = `${roleSlug || roleName}`.replace(/[_-]+/g, ' ').trim();
-    const homeHref = roleValue === 'ADMIN' ? '/dashboard' : roleValue === 'CHED LO' ? '/vehicle-assignment' : roleValue.startsWith('CHED ') ? '/table-assignment/create' : '/participant-dashboard';
+    const homeHref =
+        roleValue === 'ADMIN'
+            ? '/dashboard'
+            : roleValue === 'CHED LO'
+              ? '/vehicle-assignment'
+              : roleValue.startsWith('CHED ')
+                ? '/table-assignment/create'
+                : '/participant-dashboard';
 
     const mainNavItems: NavItem[] = [
         {
@@ -72,6 +82,15 @@ export function AppHeader({ breadcrumbs = [] }: AppHeaderProps) {
             icon: LayoutGrid,
         },
     ];
+
+    const itemHref = (item: NavItem) => item.href ?? '#';
+    const isSubItemActive = (item: NavItem) =>
+        item.href ? page.url.startsWith(resolveUrl(item.href)) : false;
+    const isActiveItem = (item: NavItem) =>
+        item.href
+            ? isSameUrl(page.url, item.href)
+            : (item.items?.some(isSubItemActive) ?? false);
+
     return (
         <>
             <div className="border-b border-sidebar-border/80">
@@ -101,28 +120,83 @@ export function AppHeader({ breadcrumbs = [] }: AppHeaderProps) {
                                 <div className="flex h-full flex-1 flex-col space-y-4 p-4">
                                     <div className="flex h-full flex-col justify-between text-sm">
                                         <div className="flex flex-col space-y-4">
-                                            {mainNavItems.map((item) => (
-                                                <Link
-                                                    key={item.title}
-                                                    href={item.href}
-                                                    className="flex items-center space-x-2 font-medium"
-                                                >
-                                                    {item.icon && (
-                                                        <Icon
-                                                            iconNode={item.icon}
-                                                            className="h-5 w-5"
-                                                        />
-                                                    )}
-                                                    <span>{item.title}</span>
-                                                </Link>
-                                            ))}
+                                            {mainNavItems.map((item) => {
+                                                if (
+                                                    item.items &&
+                                                    item.items.length > 0
+                                                ) {
+                                                    return (
+                                                        <div
+                                                            key={item.title}
+                                                            className="space-y-2"
+                                                        >
+                                                            <div className="flex items-center space-x-2 font-medium">
+                                                                {item.icon && (
+                                                                    <Icon
+                                                                        iconNode={
+                                                                            item.icon
+                                                                        }
+                                                                        className="h-5 w-5"
+                                                                    />
+                                                                )}
+                                                                <span>
+                                                                    {item.title}
+                                                                </span>
+                                                            </div>
+                                                            <div className="ml-7 flex flex-col gap-2">
+                                                                {item.items.map(
+                                                                    (
+                                                                        subItem,
+                                                                    ) => (
+                                                                        <Link
+                                                                            key={
+                                                                                subItem.title
+                                                                            }
+                                                                            href={itemHref(
+                                                                                subItem,
+                                                                            )}
+                                                                            className="text-sidebar-foreground/80 hover:text-sidebar-foreground"
+                                                                        >
+                                                                            {
+                                                                                subItem.title
+                                                                            }
+                                                                        </Link>
+                                                                    ),
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+
+                                                return (
+                                                    <Link
+                                                        key={item.title}
+                                                        href={itemHref(item)}
+                                                        className="flex items-center space-x-2 font-medium"
+                                                    >
+                                                        {item.icon && (
+                                                            <Icon
+                                                                iconNode={
+                                                                    item.icon
+                                                                }
+                                                                className="h-5 w-5"
+                                                            />
+                                                        )}
+                                                        <span>
+                                                            {item.title}
+                                                        </span>
+                                                    </Link>
+                                                );
+                                            })}
                                         </div>
 
                                         <div className="flex flex-col space-y-4">
                                             {rightNavItems.map((item) => (
                                                 <a
                                                     key={item.title}
-                                                    href={resolveUrl(item.href)}
+                                                    href={resolveUrl(
+                                                        itemHref(item),
+                                                    )}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="flex items-center space-x-2 font-medium"
@@ -155,35 +229,94 @@ export function AppHeader({ breadcrumbs = [] }: AppHeaderProps) {
                     <div className="ml-6 hidden h-full items-center space-x-6 lg:flex">
                         <NavigationMenu className="flex h-full items-stretch">
                             <NavigationMenuList className="flex h-full items-stretch space-x-2">
-                                {mainNavItems.map((item, index) => (
-                                    <NavigationMenuItem
-                                        key={index}
-                                        className="relative flex h-full items-center"
-                                    >
-                                        <Link
-                                            href={item.href}
-                                            className={cn(
-                                                navigationMenuTriggerStyle(),
-                                                isSameUrl(
-                                                    page.url,
-                                                    item.href,
-                                                ) && activeItemStyles,
-                                                'h-9 cursor-pointer px-3',
-                                            )}
+                                {mainNavItems.map((item, index) => {
+                                    const active = isActiveItem(item);
+
+                                    if (item.items && item.items.length > 0) {
+                                        return (
+                                            <NavigationMenuItem
+                                                key={index}
+                                                className="relative flex h-full items-center"
+                                            >
+                                                <NavigationMenuTrigger
+                                                    className={cn(
+                                                        active &&
+                                                            activeItemStyles,
+                                                        'h-9 cursor-pointer px-3',
+                                                    )}
+                                                >
+                                                    {item.icon && (
+                                                        <Icon
+                                                            iconNode={item.icon}
+                                                            className="mr-2 h-4 w-4"
+                                                        />
+                                                    )}
+                                                    {item.title}
+                                                </NavigationMenuTrigger>
+                                                <NavigationMenuContent className="w-56">
+                                                    <div className="grid gap-1 p-1">
+                                                        {item.items.map(
+                                                            (subItem) => (
+                                                                <NavigationMenuLink
+                                                                    key={
+                                                                        subItem.title
+                                                                    }
+                                                                    asChild
+                                                                >
+                                                                    <Link
+                                                                        href={itemHref(
+                                                                            subItem,
+                                                                        )}
+                                                                        className={cn(
+                                                                            isSubItemActive(
+                                                                                subItem,
+                                                                            ) &&
+                                                                                activeItemStyles,
+                                                                        )}
+                                                                    >
+                                                                        {
+                                                                            subItem.title
+                                                                        }
+                                                                    </Link>
+                                                                </NavigationMenuLink>
+                                                            ),
+                                                        )}
+                                                    </div>
+                                                </NavigationMenuContent>
+                                                {active && (
+                                                    <div className="absolute bottom-0 left-0 h-0.5 w-full translate-y-px bg-black dark:bg-white"></div>
+                                                )}
+                                            </NavigationMenuItem>
+                                        );
+                                    }
+
+                                    return (
+                                        <NavigationMenuItem
+                                            key={index}
+                                            className="relative flex h-full items-center"
                                         >
-                                            {item.icon && (
-                                                <Icon
-                                                    iconNode={item.icon}
-                                                    className="mr-2 h-4 w-4"
-                                                />
+                                            <Link
+                                                href={itemHref(item)}
+                                                className={cn(
+                                                    navigationMenuTriggerStyle(),
+                                                    active && activeItemStyles,
+                                                    'h-9 cursor-pointer px-3',
+                                                )}
+                                            >
+                                                {item.icon && (
+                                                    <Icon
+                                                        iconNode={item.icon}
+                                                        className="mr-2 h-4 w-4"
+                                                    />
+                                                )}
+                                                {item.title}
+                                            </Link>
+                                            {active && (
+                                                <div className="absolute bottom-0 left-0 h-0.5 w-full translate-y-px bg-black dark:bg-white"></div>
                                             )}
-                                            {item.title}
-                                        </Link>
-                                        {isSameUrl(page.url, item.href) && (
-                                            <div className="absolute bottom-0 left-0 h-0.5 w-full translate-y-px bg-black dark:bg-white"></div>
-                                        )}
-                                    </NavigationMenuItem>
-                                ))}
+                                        </NavigationMenuItem>
+                                    );
+                                })}
                             </NavigationMenuList>
                         </NavigationMenu>
                     </div>
@@ -206,7 +339,9 @@ export function AppHeader({ breadcrumbs = [] }: AppHeaderProps) {
                                         <Tooltip>
                                             <TooltipTrigger>
                                                 <a
-                                                    href={resolveUrl(item.href)}
+                                                    href={resolveUrl(
+                                                        itemHref(item),
+                                                    )}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="group ml-1 inline-flex h-9 w-9 items-center justify-center rounded-md bg-transparent p-0 text-sm font-medium text-accent-foreground ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"

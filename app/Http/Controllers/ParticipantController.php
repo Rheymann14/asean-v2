@@ -3,17 +3,22 @@
 namespace App\Http\Controllers;
 
 use App\Models\Country;
+use App\Models\EventRegistrationAttendee;
 use App\Models\ParticipantAttendance;
 use App\Models\Programme;
+use App\Models\RegistrationField;
 use App\Models\User;
 use App\Models\UserType;
 use App\Services\WelcomeNotificationService;
+use App\Support\EventDefaults;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator as ValidationValidator;
 use Inertia\Inertia;
 
 class ParticipantController extends Controller
@@ -38,8 +43,32 @@ class ParticipantController extends Controller
         'other',
     ];
 
-    public function index()
+    public function index(Request $request)
     {
+        $programmesForFilters = Programme::query()
+            ->with([
+                'registrationFields',
+                'venues' => fn ($query) => $query->where('is_active', true)->orderBy('id'),
+            ])
+            ->orderBy('starts_at')
+            ->get();
+        $defaultProgrammeId = EventDefaults::defaultEventId($programmesForFilters);
+
+        $filters = [
+            'search' => trim((string) $request->query('search', '')),
+            'country_id' => (string) $request->query('country_id', 'all'),
+            'user_type_id' => (string) $request->query('user_type_id', 'all'),
+            'status' => (string) $request->query('status', 'all'),
+            'programme_id' => $request->has('programme_id')
+                ? (string) $request->query('programme_id', 'all')
+                : ($defaultProgrammeId > 0 ? (string) $defaultProgrammeId : 'all'),
+        ];
+
+        $perPage = (int) $request->query('per_page', 10);
+        if (! in_array($perPage, [10, 20, 50, 100, 1000], true)) {
+            $perPage = 10;
+        }
+
         $countries = Country::orderBy('name')->get()->map(fn (Country $country) => [
             'id' => $country->id,
             'code' => $country->code,
@@ -56,18 +85,266 @@ class ParticipantController extends Controller
             'sequence_order' => $type->sequence_order,
         ]);
 
-        $attendanceByUser = ParticipantAttendance::query()
-            ->select(['user_id', 'programme_id', 'scanned_at'])
-            ->get()
-            ->groupBy('user_id');
+        $selectedProgramme = $filters['programme_id'] !== 'all' && is_numeric($filters['programme_id'])
+            ? Programme::query()->find((int) $filters['programme_id'])
+            : null;
 
-        $participants = User::with(['country', 'userType', 'joinedProgrammes'])
-            ->orderBy('name')
-            ->get()
-            ->map(function (User $user) use ($attendanceByUser) {
-                $attendanceEntries = $attendanceByUser->get($user->id, collect());
+        $usesAsemme10RegistrationData = $selectedProgramme
+            ? $this->isAsemme10Programme($selectedProgramme)
+            : false;
 
-                return [
+        if ($usesAsemme10RegistrationData) {
+            $participantPaginator = EventRegistrationAttendee::query()
+                ->with([
+                    'submission.country',
+                    'user.country',
+                    'user.userType',
+                    'user.joinedProgrammes:id,title',
+                ])
+                ->where('programme_id', $selectedProgramme->id)
+                ->when($filters['search'] !== '', function ($query) use ($filters) {
+                    $search = $filters['search'];
+
+                    $query->where(function ($query) use ($search) {
+                        $query
+                            ->where('given_name', 'like', "%{$search}%")
+                            ->orWhere('family_name', 'like', "%{$search}%")
+                            ->orWhere('badge_name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%")
+                            ->orWhere('role', 'like', "%{$search}%")
+                            ->orWhere('organization_name', 'like', "%{$search}%")
+                            ->orWhere('position_title', 'like', "%{$search}%")
+                            ->orWhereHas('submission', function ($submissionQuery) use ($search) {
+                                $submissionQuery
+                                    ->where('registration_type', 'like', "%{$search}%")
+                                    ->orWhere('focal_name', 'like', "%{$search}%")
+                                    ->orWhere('focal_email', 'like', "%{$search}%");
+                            })
+                            ->orWhereHas('submission.country', fn ($countryQuery) => $countryQuery->where('name', 'like', "%{$search}%"))
+                            ->orWhereHas('user.country', fn ($countryQuery) => $countryQuery->where('name', 'like', "%{$search}%"));
+                    });
+                })
+                ->when($filters['country_id'] !== 'all' && is_numeric($filters['country_id']), function ($query) use ($filters) {
+                    $countryId = (int) $filters['country_id'];
+
+                    $query->where(function ($query) use ($countryId) {
+                        $query
+                            ->whereHas('submission', fn ($submissionQuery) => $submissionQuery->where('country_id', $countryId))
+                            ->orWhereHas('user', fn ($userQuery) => $userQuery->where('country_id', $countryId));
+                    });
+                })
+                ->when($filters['user_type_id'] !== 'all' && is_numeric($filters['user_type_id']), function ($query) use ($filters) {
+                    $query->whereHas('user', fn ($userQuery) => $userQuery->where('user_type_id', (int) $filters['user_type_id']));
+                })
+                ->when(in_array($filters['status'], ['active', 'inactive'], true), function ($query) use ($filters) {
+                    $query->whereHas('user', fn ($userQuery) => $userQuery->where('is_active', $filters['status'] === 'active'));
+                })
+                ->orderByDesc('created_at')
+                ->orderBy('role')
+                ->paginate($perPage)
+                ->withQueryString();
+
+            $participantIds = collect($participantPaginator->items())
+                ->pluck('user_id')
+                ->filter()
+                ->unique()
+                ->values();
+
+            $attendanceByUser = ParticipantAttendance::query()
+                ->select(['user_id', 'programme_id', 'scanned_at'])
+                ->whereIn('user_id', $participantIds)
+                ->get()
+                ->groupBy('user_id');
+
+            $responsesByUser = DB::table('registration_field_responses')
+                ->select(['user_id', 'programme_id', 'registration_field_id', 'answer'])
+                ->whereIn('user_id', $participantIds)
+                ->get()
+                ->groupBy('user_id')
+                ->map(function ($rows) {
+                    return $rows
+                        ->groupBy('programme_id')
+                        ->map(function ($programmeRows) {
+                            return $programmeRows->mapWithKeys(function ($row) {
+                                $decoded = json_decode((string) $row->answer, true);
+
+                                return [
+                                    (string) $row->registration_field_id => json_last_error() === JSON_ERROR_NONE
+                                        ? $decoded
+                                        : $row->answer,
+                                ];
+                            })->all();
+                        })
+                        ->all();
+                });
+
+            $participants = $participantPaginator
+                ->getCollection()
+                ->map(function (EventRegistrationAttendee $attendee) use ($attendanceByUser, $responsesByUser) {
+                    $user = $attendee->user;
+                    $submission = $attendee->submission;
+                    $country = $submission?->country ?? $user?->country;
+                    $attendanceEntries = $user
+                        ? $attendanceByUser->get($user->id, collect())
+                        : collect();
+                    $fullName = trim(collect([$attendee->given_name, $attendee->family_name])->filter()->implode(' '));
+
+                    return [
+                        'id' => $user?->id,
+                        'full_name' => $fullName ?: ($attendee->badge_name ?: ($user?->name ?? 'Participant')),
+                        'display_id' => $user?->display_id,
+                        'qr_payload' => $user?->qr_payload,
+                        'profile_image_url' => $user?->profile_photo_path ? asset($user->profile_photo_path) : null,
+                        'profile_photo_url' => $user?->profile_photo_path ? asset($user->profile_photo_path) : null,
+                        'profile_photo_path' => $user?->profile_photo_path,
+                        'email' => $attendee->email ?: ($user?->email ?? ''),
+                        'contact_number' => $user?->contact_number,
+                        'contact_country_code' => $user?->contact_country_code,
+                        'country_id' => $country?->id,
+                        'user_type_id' => $user?->user_type_id,
+                        'other_user_type' => $user?->other_user_type,
+                        'honorific_title' => $attendee->title ?: $user?->honorific_title,
+                        'honorific_other' => $user?->honorific_other,
+                        'given_name' => $attendee->given_name,
+                        'middle_name' => $user?->middle_name,
+                        'family_name' => $attendee->family_name,
+                        'suffix' => $user?->suffix,
+                        'sex_assigned_at_birth' => $user?->sex_assigned_at_birth,
+                        'organization_name' => $attendee->organization_name ?: $user?->organization_name,
+                        'position_title' => $attendee->position_title ?: $user?->position_title,
+                        'ip_affiliation' => $user?->ip_affiliation,
+                        'ip_group_name' => $user?->ip_group_name,
+                        'is_active' => (bool) ($user?->is_active ?? true),
+                        'consent_contact_sharing' => $user?->consent_contact_sharing,
+                        'consent_photo_video' => $user?->consent_photo_video,
+                        'has_food_restrictions' => $user?->has_food_restrictions,
+                        'food_restrictions' => $user?->food_restrictions ?? [],
+                        'dietary_allergies' => $attendee->dietary_requirements ?: $user?->dietary_allergies,
+                        'dietary_other' => $user?->dietary_other,
+                        'accessibility_needs' => $user?->accessibility_needs ?? [],
+                        'accessibility_other' => $attendee->mobility_or_special_needs ?: $user?->accessibility_other,
+                        'emergency_contact_name' => $user?->emergency_contact_name,
+                        'emergency_contact_relationship' => $user?->emergency_contact_relationship,
+                        'emergency_contact_phone' => $user?->emergency_contact_phone,
+                        'emergency_contact_email' => $user?->emergency_contact_email,
+                        'created_at' => $attendee->created_at?->toISOString(),
+                        'joined_programme_ids' => $user?->joinedProgrammes
+                            ? $user->joinedProgrammes->pluck('id')->values()->all()
+                            : [],
+                        'checked_in_programme_ids' => $attendanceEntries
+                            ->pluck('programme_id')
+                            ->values()
+                            ->all(),
+                        'checked_in_programmes' => $attendanceEntries
+                            ->map(fn (ParticipantAttendance $attendance) => [
+                                'programme_id' => $attendance->programme_id,
+                                'scanned_at' => $attendance->scanned_at?->toISOString(),
+                            ])
+                            ->values()
+                            ->all(),
+                        'registration_responses' => $user ? $responsesByUser->get($user->id, []) : [],
+                        'asemme10_registration' => [
+                            'attendee_id' => $attendee->id,
+                            'submission_id' => $submission?->id,
+                            'role' => $attendee->role,
+                            'title' => $attendee->title,
+                            'badge_name' => $attendee->badge_name,
+                            'registration_type' => $submission?->registration_type,
+                            'focal_name' => $submission?->focal_name,
+                            'focal_email' => $submission?->focal_email,
+                            'focal_phone' => $submission?->focal_phone,
+                            'focal_organization' => $submission?->focal_organization,
+                            'focal_position' => $submission?->focal_position,
+                            'consents' => $submission?->consents ?? [],
+                            'delegation_details' => $submission?->delegation_details ?? [],
+                            'dietary_requirements' => $attendee->dietary_requirements,
+                            'mobility_or_special_needs' => $attendee->mobility_or_special_needs,
+                            'submitted_at' => $submission?->submitted_at?->toISOString(),
+                            'status' => $submission?->status,
+                        ],
+                        'country' => $country
+                            ? [
+                                'id' => $country->id,
+                                'code' => $country->code,
+                                'name' => $country->name,
+                                'is_active' => $country->is_active,
+                                'flag_url' => $country->flag_url,
+                            ]
+                            : null,
+                        'user_type' => $user?->userType
+                            ? [
+                                'id' => $user->userType->id,
+                                'name' => $user->userType->name,
+                                'slug' => $user->userType->slug,
+                                'is_active' => $user->userType->is_active,
+                                'sequence_order' => $user->userType->sequence_order,
+                            ]
+                            : null,
+                    ];
+                });
+        } else {
+            $participantQuery = User::query()
+            ->with(['country', 'userType', 'joinedProgrammes:id,title'])
+            ->when($filters['search'] !== '', function ($query) use ($filters) {
+                $search = $filters['search'];
+
+                $query->where(function ($query) use ($search) {
+                    $query
+                        ->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('contact_number', 'like', "%{$search}%")
+                        ->orWhereHas('country', fn ($countryQuery) => $countryQuery->where('name', 'like', "%{$search}%"))
+                        ->orWhereHas('userType', fn ($typeQuery) => $typeQuery->where('name', 'like', "%{$search}%"));
+                });
+            })
+            ->when($filters['country_id'] !== 'all' && is_numeric($filters['country_id']), fn ($query) => $query->where('country_id', (int) $filters['country_id']))
+            ->when($filters['user_type_id'] !== 'all' && is_numeric($filters['user_type_id']), fn ($query) => $query->where('user_type_id', (int) $filters['user_type_id']))
+            ->when(in_array($filters['status'], ['active', 'inactive'], true), fn ($query) => $query->where('is_active', $filters['status'] === 'active'))
+            ->when($filters['programme_id'] !== 'all' && is_numeric($filters['programme_id']), function ($query) use ($filters) {
+                $query->whereHas('joinedProgrammes', fn ($programmeQuery) => $programmeQuery->whereKey((int) $filters['programme_id']));
+            })
+            ->orderBy('name');
+
+            $participantPaginator = $participantQuery
+                ->paginate($perPage)
+                ->withQueryString();
+
+            $participantIds = collect($participantPaginator->items())->pluck('id');
+
+            $attendanceByUser = ParticipantAttendance::query()
+                ->select(['user_id', 'programme_id', 'scanned_at'])
+                ->whereIn('user_id', $participantIds)
+                ->get()
+                ->groupBy('user_id');
+
+            $responsesByUser = DB::table('registration_field_responses')
+                ->select(['user_id', 'programme_id', 'registration_field_id', 'answer'])
+                ->whereIn('user_id', $participantIds)
+                ->get()
+                ->groupBy('user_id')
+                ->map(function ($rows) {
+                    return $rows
+                        ->groupBy('programme_id')
+                        ->map(function ($programmeRows) {
+                            return $programmeRows->mapWithKeys(function ($row) {
+                                $decoded = json_decode((string) $row->answer, true);
+
+                                return [
+                                    (string) $row->registration_field_id => json_last_error() === JSON_ERROR_NONE
+                                        ? $decoded
+                                        : $row->answer,
+                                ];
+                            })->all();
+                        })
+                        ->all();
+                });
+
+            $participants = $participantPaginator
+                ->getCollection()
+                ->map(function (User $user) use ($attendanceByUser, $responsesByUser) {
+                    $attendanceEntries = $attendanceByUser->get($user->id, collect());
+
+                    return [
                     'id' => $user->id,
                     'full_name' => $user->name,
                     'display_id' => $user->display_id,
@@ -120,6 +397,7 @@ class ParticipantController extends Controller
                         ])
                         ->values()
                         ->all(),
+                    'registration_responses' => $responsesByUser->get($user->id, []),
                     'country' => $user->country
                         ? [
                             'id' => $user->country->id,
@@ -138,13 +416,11 @@ class ParticipantController extends Controller
                             'sequence_order' => $user->userType->sequence_order,
                         ]
                         : null,
-                ];
-            });
+                    ];
+                });
+        }
 
-        $programmes = Programme::query()
-            ->with(['venues' => fn ($query) => $query->where('is_active', true)->orderBy('id')])
-            ->orderBy('starts_at')
-            ->get()
+        $programmes = $programmesForFilters
             ->map(function (Programme $programme) {
                 $venue = $programme->venues->first();
 
@@ -162,8 +438,10 @@ class ParticipantController extends Controller
                             'address' => $venue->address,
                         ]
                         : null,
+                    'registration_fields' => $this->registrationFieldsPayload($programme),
                     'image_url' => $programme->image_url,
                     'is_active' => $programme->is_active,
+                    'is_registration_active' => $programme->is_registration_active,
                 ];
             });
 
@@ -171,13 +449,34 @@ class ParticipantController extends Controller
             'countries' => $countries,
             'userTypes' => $userTypes,
             'participants' => $participants,
+            'participantPagination' => [
+                'current_page' => $participantPaginator->currentPage(),
+                'last_page' => $participantPaginator->lastPage(),
+                'per_page' => $participantPaginator->perPage(),
+                'total' => $participantPaginator->total(),
+                'from' => $participantPaginator->firstItem(),
+                'to' => $participantPaginator->lastItem(),
+            ],
+            'filters' => $filters,
             'programmes' => $programmes,
+        ]);
+    }
+
+    private function isAsemme10Programme(Programme $programme): bool
+    {
+        $value = Str::lower(trim(($programme->tag ?? '').' '.$programme->title));
+
+        return Str::contains($value, [
+            'asemme10',
+            'asemme 10',
+            'asia-europe meeting of ministers for education',
+            '10th asia-europe meeting',
         ]);
     }
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
+        $validator = Validator::make($request->all(), [
             'full_name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'contact_number' => ['nullable', 'string', 'max:30'],
@@ -212,7 +511,13 @@ class ParticipantController extends Controller
             'emergency_contact_email' => ['nullable', 'email', 'max:255'],
             'profile_image' => ['nullable', 'image', 'max:5120'],
             'remove_profile_image' => ['nullable', 'boolean'],
+            'programme_id' => ['nullable', 'integer', 'exists:programmes,id'],
+            'registration_responses' => ['nullable', 'array'],
         ]);
+
+        $validator->after(fn (ValidationValidator $validator) => $this->validateRegistrationResponses($validator, $request));
+
+        $validated = $validator->validate();
 
         $userTypeId = $validated['user_type_id'] ?? null;
         $otherUserType = $this->isOtherUserTypeId($userTypeId)
@@ -267,6 +572,8 @@ class ParticipantController extends Controller
             'profile_photo_path' => $this->storeProfileImage($request->file('profile_image')),
         ])->refresh();
 
+        $this->syncSelectedProgrammeAndResponses($user, $request);
+
         app(WelcomeNotificationService::class)->dispatch($user);
 
         return back();
@@ -274,9 +581,9 @@ class ParticipantController extends Controller
 
     public function update(Request $request, User $participant)
     {
-        $validated = $request->validate([
+        $validator = Validator::make($request->all(), [
             'full_name' => ['sometimes', 'required', 'string', 'max:255'],
-            'email' => ['sometimes', 'required', 'email', 'max:255', 'unique:users,email,' . $participant->id],
+            'email' => ['sometimes', 'required', 'email', 'max:255', 'unique:users,email,'.$participant->id],
             'contact_number' => ['sometimes', 'nullable', 'string', 'max:30'],
             'contact_country_code' => ['sometimes', 'nullable', 'string', 'max:10'],
             'country_id' => ['nullable', 'exists:countries,id'],
@@ -309,7 +616,13 @@ class ParticipantController extends Controller
             'emergency_contact_email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'profile_image' => ['sometimes', 'nullable', 'image', 'max:5120'],
             'remove_profile_image' => ['sometimes', 'nullable', 'boolean'],
+            'programme_id' => ['nullable', 'integer', 'exists:programmes,id'],
+            'registration_responses' => ['nullable', 'array'],
         ]);
+
+        $validator->after(fn (ValidationValidator $validator) => $this->validateRegistrationResponses($validator, $request));
+
+        $validated = $validator->validate();
 
         $wasActive = (bool) $participant->is_active;
         $updates = [];
@@ -440,6 +753,8 @@ class ParticipantController extends Controller
 
         $participant->update($updates);
 
+        $this->syncSelectedProgrammeAndResponses($participant, $request);
+
         if ($wasActive && array_key_exists('is_active', $updates) && ! $updates['is_active']) {
             DB::table('sessions')->where('user_id', $participant->id)->delete();
             $participant->forceFill(['remember_token' => Str::random(60)])->save();
@@ -532,7 +847,148 @@ class ParticipantController extends Controller
 
         $file->move($directory, $filename);
 
-        return 'profile-image/' . $filename;
+        return 'profile-image/'.$filename;
+    }
+
+    private function registrationFieldsPayload(Programme $programme): array
+    {
+        return $programme->registrationFields
+            ->map(fn (RegistrationField $field) => [
+                'id' => $field->id,
+                'field_key' => $field->field_key,
+                'label' => $field->label,
+                'field_type' => $field->field_type,
+                'options' => $field->options ?? [],
+                'placeholder' => $field->placeholder,
+                'help_text' => $field->help_text,
+                'is_required' => $field->is_required,
+                'sort_order' => $field->sort_order,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function validateRegistrationResponses(ValidationValidator $validator, Request $request): void
+    {
+        $programmeId = $request->integer('programme_id');
+        if (! $programmeId) {
+            return;
+        }
+
+        $responses = is_array($request->input('registration_responses'))
+            ? $request->input('registration_responses')
+            : [];
+
+        RegistrationField::query()
+            ->where('programme_id', $programmeId)
+            ->orderBy('sort_order')
+            ->get()
+            ->each(function (RegistrationField $field) use ($validator, $responses, $programmeId) {
+                if ($field->field_type === 'section') {
+                    return;
+                }
+
+                $value = $responses[$programmeId][$field->id]
+                    ?? $responses[(string) $programmeId][(string) $field->id]
+                    ?? $responses[(string) $programmeId][$field->id]
+                    ?? $responses[$programmeId][(string) $field->id]
+                    ?? null;
+
+                $attribute = "registration_responses.{$programmeId}.{$field->id}";
+
+                if ($field->is_required && $this->isBlankDynamicAnswer($value)) {
+                    $validator->errors()->add($attribute, "{$field->label} is required.");
+
+                    return;
+                }
+
+                if ($this->isBlankDynamicAnswer($value)) {
+                    return;
+                }
+
+                $options = collect($field->options ?? [])->map(fn ($option) => (string) $option)->all();
+
+                if (in_array($field->field_type, ['radio', 'select'], true) && $options && ! in_array((string) $value, $options, true)) {
+                    $validator->errors()->add($attribute, "{$field->label} has an invalid selection.");
+                }
+
+                if ($field->field_type === 'checkbox') {
+                    if (! is_array($value)) {
+                        $validator->errors()->add($attribute, "{$field->label} has an invalid selection.");
+
+                        return;
+                    }
+
+                    foreach ($value as $selected) {
+                        if ($options && ! in_array((string) $selected, $options, true)) {
+                            $validator->errors()->add($attribute, "{$field->label} has an invalid selection.");
+
+                            return;
+                        }
+                    }
+                }
+
+                if ($field->field_type === 'email' && ! filter_var((string) $value, FILTER_VALIDATE_EMAIL)) {
+                    $validator->errors()->add($attribute, "{$field->label} must be a valid email address.");
+                }
+            });
+    }
+
+    private function syncSelectedProgrammeAndResponses(User $user, Request $request): void
+    {
+        $programmeId = $request->integer('programme_id');
+        if (! $programmeId) {
+            return;
+        }
+
+        $user->joinedProgrammes()->syncWithoutDetaching([$programmeId]);
+
+        $responses = is_array($request->input('registration_responses'))
+            ? $request->input('registration_responses')
+            : [];
+
+        $fields = RegistrationField::query()
+            ->where('programme_id', $programmeId)
+            ->where('field_type', '!=', 'section')
+            ->get();
+
+        foreach ($fields as $field) {
+            $value = $responses[$programmeId][$field->id]
+                ?? $responses[(string) $programmeId][(string) $field->id]
+                ?? $responses[(string) $programmeId][$field->id]
+                ?? $responses[$programmeId][(string) $field->id]
+                ?? null;
+
+            if ($this->isBlankDynamicAnswer($value)) {
+                $user->registrationFieldResponses()
+                    ->where('programme_id', $programmeId)
+                    ->where('registration_field_id', $field->id)
+                    ->delete();
+
+                continue;
+            }
+
+            $answer = is_array($value)
+                ? array_values(array_filter($value, fn ($item) => trim((string) $item) !== ''))
+                : trim((string) $value);
+
+            $user->registrationFieldResponses()->updateOrCreate(
+                [
+                    'programme_id' => $programmeId,
+                    'registration_field_id' => $field->id,
+                ],
+                ['answer' => $answer],
+            );
+        }
+    }
+
+    private function isBlankDynamicAnswer(mixed $value): bool
+    {
+        if (is_array($value)) {
+            return collect($value)->filter(fn ($item) => trim((string) $item) !== '')->isEmpty();
+        }
+
+        return trim((string) $value) === '';
     }
 
     public function revertAttendance(Request $request, User $participant, Programme $programme)

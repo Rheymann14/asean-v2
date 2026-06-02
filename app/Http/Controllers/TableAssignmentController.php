@@ -6,6 +6,7 @@ use App\Models\ParticipantTable;
 use App\Models\ParticipantTableAssignment;
 use App\Models\Programme;
 use App\Models\User;
+use App\Support\EventDefaults;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -48,9 +49,12 @@ class TableAssignmentController extends Controller
             ->get();
 
         $now = now();
-        $defaultEvent = $events->first(fn (Programme $event) => $this->isProgrammeOpen($event, $now));
-
-        $selectedEventId = (int) $request->input('event_id', $defaultEvent?->id ?? $events->first()?->id);
+        $selectedEventId = $request->has('event_id')
+            ? (int) $request->input('event_id')
+            : EventDefaults::defaultEventId(
+                $events,
+                fn ($events) => $events->first(fn (Programme $event) => $this->isProgrammeOpen($event, $now)),
+            );
 
         $tables = ParticipantTable::with(['assignments.user.country', 'assignments.user.userType'])
             ->when($selectedEventId, fn ($query) => $query->where('programme_id', $selectedEventId))
@@ -169,6 +173,7 @@ class TableAssignmentController extends Controller
                 'starts_at' => $event->starts_at?->toISOString(),
                 'ends_at' => $event->ends_at?->toISOString(),
                 'is_active' => $event->is_active,
+                'is_registration_active' => $event->is_registration_active,
             ]),
             'selected_event_id' => $selectedEventId ?: null,
             'view' => $view,
@@ -200,6 +205,7 @@ class TableAssignmentController extends Controller
                 'starts_at' => $event->starts_at?->toISOString(),
                 'ends_at' => $event->ends_at?->toISOString(),
                 'location' => $event->location,
+                'is_registration_active' => $event->is_registration_active,
                 'table' => $table
                     ? [
                         'table_number' => $table->table_number,

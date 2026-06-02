@@ -26,12 +26,14 @@ class Programme extends Model
         'signatory_title',
         'signatory_signature_url',
         'is_active',
+        'is_registration_active',
     ];
 
     protected $casts = [
         'starts_at' => 'datetime',
         'ends_at' => 'datetime',
         'is_active' => 'boolean',
+        'is_registration_active' => 'boolean',
     ];
 
     public function user(): BelongsTo
@@ -49,8 +51,18 @@ class Programme extends Model
         return $this->hasMany(ProgrammeMaterial::class);
     }
 
+    public function registrationFields(): HasMany
+    {
+        return $this->hasMany(RegistrationField::class)->orderBy('sort_order')->orderBy('id');
+    }
+
     public function participants(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'participant_programmes')->withTimestamps();
+    }
+
+    public function users(): BelongsToMany
+    {
+        return $this->participants();
     }
 }
