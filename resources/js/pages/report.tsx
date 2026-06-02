@@ -696,31 +696,57 @@ export default function Reports({
                 .replaceAll('"', '&quot;')
                 .replaceAll("'", '&apos;');
 
-        const cellRef = (colIndex: number, rowIndex: number) => {
+        const columnName = (colIndex: number) => {
             let dividend = colIndex + 1;
-            let columnName = '';
+            let name = '';
 
             while (dividend > 0) {
                 const modulo = (dividend - 1) % 26;
-                columnName = String.fromCharCode(65 + modulo) + columnName;
+                name = String.fromCharCode(65 + modulo) + name;
                 dividend = Math.floor((dividend - modulo) / 26);
             }
 
-            return `${columnName}${rowIndex + 1}`;
+            return name;
+        };
+
+        const cellRef = (colIndex: number, rowIndex: number) => {
+            return `${columnName(colIndex)}${rowIndex + 1}`;
         };
 
         const toSheetRowXml = (
             rowValues: Array<string | number>,
             rowIndex: number,
         ) => {
+            const isHeader = rowIndex === 0;
             const cells = rowValues
                 .map(
                     (value, colIndex) =>
-                        `<c r="${cellRef(colIndex, rowIndex)}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`,
+                        `<c r="${cellRef(colIndex, rowIndex)}" s="${isHeader ? 1 : 2}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`,
                 )
                 .join('');
+            const rowHeight = isHeader
+                ? 24
+                : Math.min(
+                      60,
+                      Math.max(
+                          18,
+                          Math.max(
+                              ...rowValues.map((value) => {
+                                  const text = String(value);
+                                  const wrappedLines = Math.ceil(
+                                      text.length / 45,
+                                  );
+                                  return Math.max(
+                                      1,
+                                      wrappedLines,
+                                      text.split(/\r\n|\r|\n/).length,
+                                  );
+                              }),
+                          ) * 15,
+                      ),
+                  );
 
-            return `<row r="${rowIndex + 1}">${cells}</row>`;
+            return `<row r="${rowIndex + 1}" ht="${rowHeight}" customHeight="1">${cells}</row>`;
         };
 
         const headerRow = [
@@ -756,9 +782,24 @@ export default function Reports({
             ];
         });
 
-        const sheetRowsXml = [headerRow, ...dataRows]
+        const worksheetRows = [headerRow, ...dataRows];
+        const sheetRowsXml = worksheetRows
             .map((rowValues, rowIndex) => toSheetRowXml(rowValues, rowIndex))
             .join('');
+        const columnsXml = headerRow
+            .map((_, colIndex) => {
+                const values = worksheetRows.map((row) =>
+                    String(row[colIndex] ?? ''),
+                );
+                const maxLength = Math.max(
+                    ...values.map((value) => value.length),
+                );
+                const width = Math.min(45, Math.max(10, maxLength + 2));
+
+                return `<col min="${colIndex + 1}" max="${colIndex + 1}" width="${width}" bestFit="1" customWidth="1"/>`;
+            })
+            .join('');
+        const lastCellRef = `${columnName(headerRow.length - 1)}${worksheetRows.length}`;
 
         const files = [
             {
@@ -803,11 +844,11 @@ export default function Reports({
                 content:
                     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
                     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-                    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
-                    '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
-                    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+                    '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>' +
+                    '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1D4ED8"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+                    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFCBD5E1"/></left><right style="thin"><color rgb="FFCBD5E1"/></right><top style="thin"><color rgb="FFCBD5E1"/></top><bottom style="thin"><color rgb="FFCBD5E1"/></bottom><diagonal/></border></borders>' +
                     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-                    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+                    '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs>' +
                     '</styleSheet>',
             },
             {
@@ -815,9 +856,13 @@ export default function Reports({
                 content:
                     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
                     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+                    '<cols>' +
+                    columnsXml +
+                    '</cols>' +
                     '<sheetData>' +
                     sheetRowsXml +
                     '</sheetData>' +
+                    `<autoFilter ref="A1:${lastCellRef}"/>` +
                     '</worksheet>',
             },
         ];

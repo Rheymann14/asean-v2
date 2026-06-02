@@ -59,9 +59,8 @@
         <meta name="twitter:image" content="{{ $ogImage }}">
 
 
-        <link rel="icon" href="/logo.ico" sizes="any">
-        <link rel="icon" href="/logo.ico" type="image/x-icon">
-        <link rel="apple-touch-icon" href="/logo.ico">
+        <link rel="icon" href="/img/asean_logo.png" type="image/png">
+        <link rel="apple-touch-icon" href="/img/asean_logo.png">
 
         <link rel="preconnect" href="https://fonts.bunny.net">
         <link href="https://fonts.bunny.net/css?family=instrument-sans:400,500,600" rel="stylesheet" />

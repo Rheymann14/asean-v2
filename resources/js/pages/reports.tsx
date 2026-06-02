@@ -37,6 +37,7 @@ import { Head, router } from '@inertiajs/react';
 import {
     ArrowUpDown,
     Check,
+    ChevronDown,
     ChevronsUpDown,
     FileDown,
     Printer,
@@ -82,11 +83,34 @@ type ReportRow = {
     vehicle_plate_number?: string | null;
     vehicle_plate_number_by_programme: Record<string, string | null>;
     notification_sent_at_by_programme: Record<string, string | null>;
+    asemme10_registration?: Asemme10Registration | null;
+    asemme10_registration_by_programme?: Record<
+        string,
+        Asemme10Registration | null
+    >;
     has_attended: boolean;
     joined_programme_ids: number[];
     attended_programme_ids: number[];
     attendance_by_programme: Record<string, string | null>;
     latest_attendance_at?: string | null;
+};
+
+type Asemme10Registration = {
+    attendee_id?: number | null;
+    role?: string | null;
+    title?: string | null;
+    given_name?: string | null;
+    family_name?: string | null;
+    badge_name?: string | null;
+    organization_name?: string | null;
+    position_title?: string | null;
+    email?: string | null;
+    dietary_requirements?: string | null;
+    mobility_or_special_needs?: string | null;
+    registration_type?: string | null;
+    focal_name?: string | null;
+    focal_email?: string | null;
+    focal_phone?: string | null;
 };
 
 type PageProps = {
@@ -163,10 +187,10 @@ function phaseBadgeClass(phase: EventPhase) {
 }
 
 function formatDateTime(value?: string | null) {
-    if (!value) return '—';
+    if (!value) return '-';
 
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '—';
+    if (Number.isNaN(date.getTime())) return '-';
 
     return new Intl.DateTimeFormat('en-PH', {
         year: 'numeric',
@@ -197,7 +221,7 @@ function displayRegistrantType(row: ReportRow) {
         return row.other_user_type?.trim() || 'Other';
     }
 
-    return row.registrant_type ?? '—';
+    return row.registrant_type ?? '-';
 }
 
 function getCheckinTime(
@@ -239,6 +263,76 @@ function getVehiclePlateNumber(
     return row.vehicle_plate_number;
 }
 
+function isAsemme10Event(event: EventRow | null) {
+    const value = `${event?.title ?? ''}`.trim().toLowerCase();
+
+    return (
+        value.includes('asemme10') ||
+        value.includes('asemme 10') ||
+        value.includes('asia-europe meeting of ministers for education') ||
+        value.includes('10th asia-europe meeting')
+    );
+}
+
+function getAsemme10Registration(
+    row: ReportRow,
+    selectedEventId: number | null,
+): Asemme10Registration | null | undefined {
+    if (selectedEventId) {
+        return row.asemme10_registration_by_programme?.[
+            String(selectedEventId)
+        ];
+    }
+
+    return row.asemme10_registration;
+}
+
+function displayAsemme10Name(
+    row: ReportRow,
+    registration?: Asemme10Registration | null,
+) {
+    const name = [
+        registration?.title,
+        registration?.given_name,
+        registration?.family_name,
+    ]
+        .map((item) => (item ?? '').trim())
+        .filter(Boolean)
+        .join(' ');
+
+    return name || buildDisplayName(row);
+}
+
+function displayAsemme10Role(role?: string | null) {
+    const value = (role ?? '').trim();
+
+    if (!value) return '-';
+
+    return value
+        .split('_')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function ReportDetailItem({
+    label,
+    children,
+}: {
+    label: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="min-w-0">
+            <div className="mb-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase dark:text-slate-400">
+                {label}
+            </div>
+            <div className="min-w-0 text-sm break-words whitespace-pre-wrap text-slate-700 dark:text-slate-300">
+                {children || '-'}
+            </div>
+        </div>
+    );
+}
+
 export default function Reports({
     summary,
     rows,
@@ -269,11 +363,32 @@ export default function Reports({
         React.useState<Record<number, boolean>>({});
     const [notificationSentAtByAssignment, setNotificationSentAtByAssignment] =
         React.useState<Record<string, string>>({});
+    const [expandedRowIds, setExpandedRowIds] = React.useState<Set<number>>(
+        () => new Set(),
+    );
 
     const getNotificationSentAtKey = React.useCallback(
         (userId: number, eventId: number) => `${userId}:${eventId}`,
         [],
     );
+
+    const toggleExpandedRow = React.useCallback((rowId: number) => {
+        setExpandedRowIds((prev) => {
+            const next = new Set(prev);
+
+            if (next.has(rowId)) {
+                next.delete(rowId);
+            } else {
+                next.add(rowId);
+            }
+
+            return next;
+        });
+    }, []);
+
+    React.useEffect(() => {
+        setExpandedRowIds(new Set());
+    }, [currentPage, entriesPerPage, search, selectedEvent]);
 
     React.useEffect(() => {
         setWelcomeDinnerByUser(
@@ -374,6 +489,10 @@ export default function Reports({
         const parsed = Number(selectedEvent);
         return Number.isNaN(parsed) || parsed <= 0 ? null : parsed;
     }, [selectedEvent]);
+    const isAsemme10Selected = React.useMemo(
+        () => isAsemme10Event(selectedEventData),
+        [selectedEventData],
+    );
 
     const getNotificationEventId = React.useCallback(
         (row: ReportRow) => {
@@ -518,6 +637,10 @@ export default function Reports({
         if (!keyword) return rowsAfterEventFilter;
 
         return rowsAfterEventFilter.filter((row) => {
+            const asemme10Registration = getAsemme10Registration(
+                row,
+                selectedEventId,
+            );
             const checkinLabel = selectedEventId
                 ? row.attended_programme_ids.includes(selectedEventId)
                     ? 'checked in attended'
@@ -531,6 +654,13 @@ export default function Reports({
                 row.country_name ?? '',
                 displayRegistrantType(row),
                 row.organization_name ?? '',
+                asemme10Registration?.badge_name ?? '',
+                asemme10Registration?.email ?? '',
+                asemme10Registration?.role ?? '',
+                asemme10Registration?.registration_type ?? '',
+                asemme10Registration?.position_title ?? '',
+                asemme10Registration?.focal_name ?? '',
+                asemme10Registration?.focal_email ?? '',
                 checkinLabel,
             ]
                 .join(' ')
@@ -592,62 +722,254 @@ export default function Reports({
             .map((row, index) => {
                 const scannedAt = getCheckinTime(row, selectedEventId);
                 const hasCheckin = Boolean(scannedAt);
+
+                if (isAsemme10Selected) {
+                    const registration = getAsemme10Registration(
+                        row,
+                        selectedEventId,
+                    );
+
+                    return `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td>${escapeHtml(row.display_id ?? String(row.id))}</td>
+                        <td>${escapeHtml(displayAsemme10Name(row, registration))}</td>
+                        <td>${escapeHtml(registration?.badge_name ?? '-')}</td>
+                        <td>${escapeHtml(row.country_name ?? '-')}</td>
+                        <td>${escapeHtml(registration?.registration_type ?? '-')}</td>
+                        <td>${escapeHtml(displayAsemme10Role(registration?.role))}</td>
+                        <td>${escapeHtml(registration?.organization_name ?? row.organization_name ?? '-')}</td>
+                        <td>${escapeHtml(registration?.position_title ?? '-')}</td>
+                        <td>${escapeHtml(registration?.email ?? '-')}</td>
+                        <td>${escapeHtml(registration?.dietary_requirements ?? '-')}</td>
+                        <td>${escapeHtml(registration?.mobility_or_special_needs ?? '-')}</td>
+                        <td>${escapeHtml(registration?.focal_name ?? '-')}</td>
+                        <td>${escapeHtml(registration?.focal_email ?? '-')}</td>
+                        <td>${escapeHtml(registration?.focal_phone ?? '-')}</td>
+                        <td>${hasCheckin ? 'Checked In' : 'Did Not Join'}</td>
+                        <td>${escapeHtml(hasCheckin ? formatDateTime(scannedAt) : '-')}</td>
+                    </tr>
+                `;
+                }
+
                 return `
                     <tr>
                         <td>${index + 1}</td>
                         <td>${escapeHtml(buildDisplayName(row))}</td>
-                        <td>${escapeHtml(row.country_name ?? '—')}</td>
+                        <td>${escapeHtml(row.country_name ?? '-')}</td>
                         <td>${escapeHtml(displayRegistrantType(row))}</td>
-                        <td>${escapeHtml(row.organization_name ?? '—')}</td>
+                        <td>${escapeHtml(row.organization_name ?? '-')}</td>
                         <td>${row.attend_welcome_dinner ? 'YES' : 'NO'}</td>
                         <td>${row.avail_transport_from_makati_to_peninsula ? 'YES' : 'NO'}</td>
-                        <td>${escapeHtml(getTableAssignment(row, selectedEventId) ?? '—')}</td>
-                        <td>${escapeHtml(getVehicleAssignment(row, selectedEventId) ?? '—')}</td>
+                        <td>${escapeHtml(getTableAssignment(row, selectedEventId) ?? '-')}</td>
+                        <td>${escapeHtml(getVehicleAssignment(row, selectedEventId) ?? '-')}</td>
                         <td>${hasCheckin ? 'Checked In' : 'Did Not Join'}</td>
-                        <td>${escapeHtml(hasCheckin ? formatDateTime(scannedAt) : '—')}</td>
+                        <td>${escapeHtml(hasCheckin ? formatDateTime(scannedAt) : '-')}</td>
                     </tr>
                 `;
             })
             .join('');
+        const tableHeaders = isAsemme10Selected
+            ? [
+                  'Seq',
+                  'Participant ID',
+                  'Name',
+                  'Badge Name',
+                  'Country',
+                  'Registration Type',
+                  'Role',
+                  'Organization',
+                  'Position',
+                  'Email',
+                  'Dietary Requirements',
+                  'Mobility or Special Needs',
+                  'Focal Person',
+                  'Focal Email',
+                  'Focal Phone',
+                  'Check-in Status',
+                  'Check-in Date and Time',
+              ]
+            : [
+                  'Seq',
+                  'Name',
+                  'Country',
+                  'Registrant Type',
+                  'Organization',
+                  'Welcome Dinner',
+                  'Transportation',
+                  'Table Assignment',
+                  'Vehicle Assignment',
+                  'Check-in Status',
+                  'Check-in Date and Time',
+              ];
+        const headerHtml = tableHeaders
+            .map((header) => `<th>${escapeHtml(header)}</th>`)
+            .join('');
+        const printTableClass = isAsemme10Selected
+            ? 'report-table asemme10-table'
+            : 'report-table';
+        const disclaimerHtml = `
+            <section class="disclaimer">
+                <p><strong>Note:</strong> This data is system generated.</p>
+                <p><strong>Disclaimer:</strong> This report is prepared for ASEAN event administration. It contains personal data protected under applicable data privacy laws and is intended only for authorized ASEAN, CHED, and event secretariat use. Unauthorized access, disclosure, copying, alteration, distribution, or use of this document, in whole or in part, is strictly prohibited.</p>
+            </section>
+        `;
+        const aseanLogoUrl = `${window.location.origin}/img/asean_logo.png`;
 
         const printHtml = `
             <html>
                 <head>
                     <title>Participants Report</title>
                     <style>
-                        @page { margin: 14mm; }
+                        @page {
+                            size: A4 landscape;
+                            margin: 10mm 8mm 16mm;
+                            @bottom-center {
+                                content: "Page " counter(page) " of " counter(pages);
+                                color: #475569;
+                                font-family: Arial, sans-serif;
+                                font-size: 8px;
+                            }
+                        }
                         html, body { background: #ffffff !important; color: #0f172a !important; }
-                        body { font-family: Arial, sans-serif; margin: 0; color: #0f172a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                        h1 { margin-bottom: 12px; font-size: 20px; color: #0f172a; }
-                        p { margin: 0 0 16px; color: #475569; font-size: 12px; }
-                        table { width: 100%; border-collapse: collapse; }
-                        th, td { border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; vertical-align: top; text-align: left; }
-                        th { background: #ffffff; }
-                    </style>
-                </head>
-                <body>
-                    <h1>Participants Report</h1>
-                    <p>Generated: ${formatDateTime(new Date().toISOString())}</p>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Seq</th>
-                                <th>Name</th>
-                                <th>Country</th>
-                                <th>Registrant Type</th>
-                                <th>Organization</th>
-                                <th>Welcome Dinner</th>
-                                <th>Transportation</th>
-                                <th>Table Assignment</th>
-                                <th>Vehicle Assignment</th>
-                                <th>Check-in Status</th>
-                                <th>Check-in Date and Time</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${rowsForPrint || '<tr><td colspan="11">No participants found.</td></tr>'}
-                        </tbody>
-                    </table>
+                        body {
+                            font-family: Arial, sans-serif;
+                            margin: 0;
+                            color: #0f172a;
+                            -webkit-print-color-adjust: exact;
+                            print-color-adjust: exact;
+                        }
+                        .print-watermark {
+                            position: fixed;
+                            inset: 0;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            pointer-events: none;
+                            z-index: 0;
+                        }
+                        .print-watermark img {
+                            width: 50%;
+                            max-width: 420px;
+                            opacity: 0.14;
+                        }
+                        .print-content {
+                            position: relative;
+                            z-index: 1;
+                        }
+                        h1 { margin: 0 0 7px; font-size: 16px; color: #0f172a; }
+                        p { margin: 0 0 6px; color: #475569; font-size: 8px; }
+                        .report-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            table-layout: fixed;
+                        }
+                        .report-table th,
+                        .report-table td {
+                            border: 1px solid #cbd5e1;
+                            padding: 3px 4px;
+                            font-size: 7px;
+                            line-height: 1.2;
+                            vertical-align: top;
+                            text-align: left;
+                            overflow-wrap: anywhere;
+                            word-break: break-word;
+                        }
+                        .report-table th {
+                            background: #f8fafc;
+                            color: #0f172a;
+                            font-weight: 700;
+                        }
+                        .asemme10-table th,
+                        .asemme10-table td {
+                            font-size: 6.2px;
+                            padding: 2px 3px;
+                            line-height: 1.15;
+                        }
+                        .asemme10-table th:nth-child(1),
+                        .asemme10-table td:nth-child(1) { width: 3%; }
+                        .asemme10-table th:nth-child(2),
+                        .asemme10-table td:nth-child(2) { width: 6%; }
+                        .asemme10-table th:nth-child(3),
+                        .asemme10-table td:nth-child(3) { width: 6%; }
+                        .asemme10-table th:nth-child(4),
+                        .asemme10-table td:nth-child(4) { width: 5%; }
+                        .asemme10-table th:nth-child(5),
+                        .asemme10-table td:nth-child(5) { width: 5%; }
+                        .asemme10-table th:nth-child(6),
+                        .asemme10-table td:nth-child(6) { width: 6%; }
+                        .asemme10-table th:nth-child(7),
+                        .asemme10-table td:nth-child(7) { width: 5%; }
+                        .asemme10-table th:nth-child(8),
+                        .asemme10-table td:nth-child(8) { width: 6%; }
+                        .asemme10-table th:nth-child(9),
+                        .asemme10-table td:nth-child(9) { width: 5%; }
+                        .asemme10-table th:nth-child(10),
+                        .asemme10-table td:nth-child(10) { width: 10%; }
+                        .asemme10-table th:nth-child(11),
+                        .asemme10-table td:nth-child(11) { width: 7%; }
+                        .asemme10-table th:nth-child(12),
+                        .asemme10-table td:nth-child(12) { width: 7%; }
+                        .asemme10-table th:nth-child(13),
+                        .asemme10-table td:nth-child(13) { width: 5%; }
+                        .asemme10-table th:nth-child(14),
+                        .asemme10-table td:nth-child(14) { width: 9%; }
+                        .asemme10-table th:nth-child(15),
+                        .asemme10-table td:nth-child(15) { width: 5%; }
+                        .asemme10-table th:nth-child(16),
+                        .asemme10-table td:nth-child(16) { width: 5%; }
+                        .asemme10-table th:nth-child(17),
+                        .asemme10-table td:nth-child(17) { width: 6%; }
+                        thead { display: table-header-group; }
+                        tr { break-inside: avoid; page-break-inside: avoid; }
+                        .disclaimer {
+                            break-before: auto;
+                            break-inside: avoid;
+                            margin-top: 12mm;
+                            border-top: 1px solid #cbd5e1;
+                            padding-top: 6mm;
+                        }
+                        .disclaimer p {
+                            color: #0f172a;
+                            font-size: 9px;
+                            line-height: 1.45;
+                            margin: 0 0 4px;
+                        }
+                        .page-footer {
+                            position: fixed;
+                            left: 0;
+                            right: 0;
+                            bottom: -9mm;
+                            text-align: center;
+                            color: #475569;
+                            font-size: 8px;
+                        }
+                        .page-footer::after {
+                            content: "Page " counter(page);
+                        }
+                     </style>
+                 </head>
+                 <body>
+                    <div class="print-watermark" aria-hidden="true">
+                        <img src="${aseanLogoUrl}" alt="" />
+                    </div>
+                    <div class="page-footer" aria-hidden="true"></div>
+                    <main class="print-content">
+                        <h1>Participants Report</h1>
+                        ${selectedEventData ? `<p>Event: ${escapeHtml(selectedEventData.title)}</p>` : ''}
+                        <p>Generated: ${formatDateTime(new Date().toISOString())}</p>
+                        <table class="${printTableClass}">
+                            <thead>
+                                <tr>
+                                    ${headerHtml}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rowsForPrint || `<tr><td colspan="${tableHeaders.length}">No participants found.</td></tr>`}
+                            </tbody>
+                        </table>
+                        ${disclaimerHtml}
+                    </main>
                 </body>
             </html>
         `;
@@ -676,14 +998,28 @@ export default function Reports({
                 return;
             }
 
-            frameWindow.focus();
-            frameWindow.print();
+            const images = Array.from(printFrame.contentDocument?.images ?? []);
+            const waitForImages = Promise.all(
+                images.map((image) =>
+                    image.complete
+                        ? Promise.resolve()
+                        : new Promise<void>((resolve) => {
+                              image.onload = () => resolve();
+                              image.onerror = () => resolve();
+                          }),
+                ),
+            );
 
-            setTimeout(cleanup, 1000);
+            waitForImages.finally(() => {
+                frameWindow.focus();
+                frameWindow.print();
+
+                setTimeout(cleanup, 1000);
+            });
         };
 
         document.body.appendChild(printFrame);
-    }, [selectedEventId, sortedRows]);
+    }, [isAsemme10Selected, selectedEventData, selectedEventId, sortedRows]);
 
     const handleExportXlsx = React.useCallback(() => {
         const encoder = new TextEncoder();
@@ -696,69 +1032,159 @@ export default function Reports({
                 .replaceAll('"', '&quot;')
                 .replaceAll("'", '&apos;');
 
-        const cellRef = (colIndex: number, rowIndex: number) => {
+        const columnName = (colIndex: number) => {
             let dividend = colIndex + 1;
-            let columnName = '';
+            let name = '';
 
             while (dividend > 0) {
                 const modulo = (dividend - 1) % 26;
-                columnName = String.fromCharCode(65 + modulo) + columnName;
+                name = String.fromCharCode(65 + modulo) + name;
                 dividend = Math.floor((dividend - modulo) / 26);
             }
 
-            return `${columnName}${rowIndex + 1}`;
+            return name;
+        };
+
+        const cellRef = (colIndex: number, rowIndex: number) => {
+            return `${columnName(colIndex)}${rowIndex + 1}`;
         };
 
         const toSheetRowXml = (
             rowValues: Array<string | number>,
             rowIndex: number,
         ) => {
+            const isHeader = rowIndex === 0;
             const cells = rowValues
                 .map(
                     (value, colIndex) =>
-                        `<c r="${cellRef(colIndex, rowIndex)}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`,
+                        `<c r="${cellRef(colIndex, rowIndex)}" s="${isHeader ? 1 : 2}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`,
                 )
                 .join('');
+            const rowHeight = isHeader
+                ? 24
+                : Math.min(
+                      60,
+                      Math.max(
+                          18,
+                          Math.max(
+                              ...rowValues.map((value) => {
+                                  const text = String(value);
+                                  const wrappedLines = Math.ceil(
+                                      text.length / 45,
+                                  );
+                                  return Math.max(
+                                      1,
+                                      wrappedLines,
+                                      text.split(/\r\n|\r|\n/).length,
+                                  );
+                              }),
+                          ) * 15,
+                      ),
+                  );
 
-            return `<row r="${rowIndex + 1}">${cells}</row>`;
+            return `<row r="${rowIndex + 1}" ht="${rowHeight}" customHeight="1">${cells}</row>`;
         };
 
-        const headerRow = [
-            'Seq',
-            'Name',
-            'Country',
-            'Registrant Type',
-            'Organization',
-            'Welcome Dinner',
-            'Transportation',
-            'Table Assignment',
-            'Vehicle Assignment',
-            'Check-in Status',
-            'Check-in Date and Time',
-        ];
+        const headerRow = isAsemme10Selected
+            ? [
+                  'Seq',
+                  'Participant ID',
+                  'Name',
+                  'Badge Name',
+                  'Country',
+                  'Registration Type',
+                  'Role',
+                  'Organization',
+                  'Position',
+                  'Email',
+                  'Dietary Requirements',
+                  'Mobility or Special Needs',
+                  'Focal Person',
+                  'Focal Email',
+                  'Focal Phone',
+                  'Check-in Status',
+                  'Check-in Date and Time',
+              ]
+            : [
+                  'Seq',
+                  'Name',
+                  'Country',
+                  'Registrant Type',
+                  'Organization',
+                  'Welcome Dinner',
+                  'Transportation',
+                  'Table Assignment',
+                  'Vehicle Assignment',
+                  'Check-in Status',
+                  'Check-in Date and Time',
+              ];
 
         const dataRows = sortedRows.map((row, index) => {
             const scannedAt = getCheckinTime(row, selectedEventId);
             const hasCheckin = Boolean(scannedAt);
 
+            if (isAsemme10Selected) {
+                const registration = getAsemme10Registration(
+                    row,
+                    selectedEventId,
+                );
+
+                return [
+                    index + 1,
+                    row.display_id ?? String(row.id),
+                    displayAsemme10Name(row, registration),
+                    registration?.badge_name ?? '-',
+                    row.country_name ?? '-',
+                    registration?.registration_type ?? '-',
+                    displayAsemme10Role(registration?.role),
+                    registration?.organization_name ??
+                        row.organization_name ??
+                        '-',
+                    registration?.position_title ?? '-',
+                    registration?.email ?? '-',
+                    registration?.dietary_requirements ?? '-',
+                    registration?.mobility_or_special_needs ?? '-',
+                    registration?.focal_name ?? '-',
+                    registration?.focal_email ?? '-',
+                    registration?.focal_phone ?? '-',
+                    hasCheckin ? 'Checked In' : 'Did Not Join',
+                    hasCheckin ? formatDateTime(scannedAt) : '-',
+                ];
+            }
+
             return [
                 index + 1,
                 buildDisplayName(row),
-                row.country_name ?? '—',
+                row.country_name ?? '-',
                 displayRegistrantType(row),
-                row.organization_name ?? '—',
+                row.organization_name ?? '-',
                 row.attend_welcome_dinner ? 'YES' : 'NO',
                 row.avail_transport_from_makati_to_peninsula ? 'YES' : 'NO',
-                getTableAssignment(row, selectedEventId) ?? '—',
-                getVehicleAssignment(row, selectedEventId) ?? '—',
+                getTableAssignment(row, selectedEventId) ?? '-',
+                getVehicleAssignment(row, selectedEventId) ?? '-',
                 hasCheckin ? 'Checked In' : 'Did Not Join',
-                hasCheckin ? formatDateTime(scannedAt) : '—',
+                hasCheckin ? formatDateTime(scannedAt) : '-',
             ];
         });
 
-        const sheetRowsXml = [headerRow, ...dataRows]
+        const worksheetRows = [headerRow, ...dataRows];
+        const sheetRowsXml = worksheetRows
             .map((rowValues, rowIndex) => toSheetRowXml(rowValues, rowIndex))
             .join('');
+        const columnsXml = headerRow
+            .map((_, colIndex) => {
+                const values = worksheetRows.map((row) =>
+                    String(row[colIndex] ?? ''),
+                );
+                const maxLength = Math.max(
+                    ...values.map((value) => value.length),
+                );
+                const width = Math.min(45, Math.max(10, maxLength + 2));
+
+                return `<col min="${colIndex + 1}" max="${colIndex + 1}" width="${width}" bestFit="1" customWidth="1"/>`;
+            })
+            .join('');
+        const lastCellRef = `${columnName(headerRow.length - 1)}${worksheetRows.length}`;
 
         const files = [
             {
@@ -803,11 +1229,11 @@ export default function Reports({
                 content:
                     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
                     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-                    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
-                    '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
-                    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+                    '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>' +
+                    '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1D4ED8"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+                    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFCBD5E1"/></left><right style="thin"><color rgb="FFCBD5E1"/></right><top style="thin"><color rgb="FFCBD5E1"/></top><bottom style="thin"><color rgb="FFCBD5E1"/></bottom><diagonal/></border></borders>' +
                     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-                    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+                    '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs>' +
                     '</styleSheet>',
             },
             {
@@ -815,9 +1241,13 @@ export default function Reports({
                 content:
                     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
                     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+                    '<cols>' +
+                    columnsXml +
+                    '</cols>' +
                     '<sheetData>' +
                     sheetRowsXml +
                     '</sheetData>' +
+                    `<autoFilter ref="A1:${lastCellRef}"/>` +
                     '</worksheet>',
             },
         ];
@@ -949,7 +1379,7 @@ export default function Reports({
         link.click();
 
         URL.revokeObjectURL(url);
-    }, [selectedEventId, sortedRows]);
+    }, [isAsemme10Selected, selectedEventId, sortedRows]);
 
     const summaryCards = React.useMemo(() => {
         if (selectedEvent === ALL_EVENTS_VALUE) return summary;
@@ -1131,7 +1561,7 @@ export default function Reports({
                                                                 }}
                                                                 className="flex items-start justify-between gap-2"
                                                             >
-                                                                <div className="flex min-w-0 items-start gap-2">
+                                                                <div className="flex w-full min-w-0 items-start justify-between gap-2 sm:block">
                                                                     <Check
                                                                         className={cn(
                                                                             'mt-0.5 h-4 w-4 shrink-0',
@@ -1224,75 +1654,509 @@ export default function Reports({
                         ) : null}
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="overflow-x-auto rounded-md border">
-                            <Table>
+                        <div className="overflow-hidden rounded-md border sm:hidden">
+                            <div className="border-b px-3 py-2 text-sm font-medium">
+                                Participant
+                            </div>
+                            {paginatedRows.length ? (
+                                paginatedRows.map((row, index) => {
+                                    const scannedAt = getCheckinTime(
+                                        row,
+                                        selectedEventId,
+                                    );
+                                    const hasCheckin = Boolean(scannedAt);
+                                    const notificationEventId =
+                                        getNotificationEventId(row);
+                                    const notificationSentAt =
+                                        notificationEventId
+                                            ? notificationSentAtByAssignment[
+                                                  getNotificationSentAtKey(
+                                                      row.id,
+                                                      notificationEventId,
+                                                  )
+                                              ]
+                                            : null;
+                                    const hasAnyNotificationSentAt =
+                                        Object.entries(
+                                            notificationSentAtByAssignment,
+                                        ).some(
+                                            ([assignmentKey, sentAt]) =>
+                                                assignmentKey.startsWith(
+                                                    `${row.id}:`,
+                                                ) && Boolean(sentAt),
+                                        );
+                                    const disableNotificationButton =
+                                        Boolean(
+                                            sendingNotificationByUser[row.id],
+                                        ) ||
+                                        !notificationEventId ||
+                                        (!selectedEventId &&
+                                            hasAnyNotificationSentAt);
+                                    const isExpanded = expandedRowIds.has(
+                                        row.id,
+                                    );
+                                    const registration =
+                                        getAsemme10Registration(
+                                            row,
+                                            selectedEventId,
+                                        );
+
+                                    return (
+                                        <div
+                                            key={row.id}
+                                            className="border-b last:border-b-0"
+                                        >
+                                            <div className="flex w-full items-start justify-between gap-3 px-3 py-3">
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="font-medium break-words text-slate-900 dark:text-slate-100">
+                                                        {isAsemme10Selected
+                                                            ? displayAsemme10Name(
+                                                                  row,
+                                                                  registration,
+                                                              )
+                                                            : buildDisplayName(
+                                                                  row,
+                                                              )}
+                                                    </p>
+                                                    <p className="text-xs break-all text-slate-500 dark:text-slate-400">
+                                                        {isAsemme10Selected
+                                                            ? `ID: ${row.display_id ?? row.id}`
+                                                            : (row.country_name ??
+                                                              '-')}
+                                                    </p>
+                                                    {!isAsemme10Selected ? (
+                                                        <p className="mt-1 text-xs break-words text-slate-500 dark:text-slate-400">
+                                                            {displayRegistrantType(
+                                                                row,
+                                                            )}
+                                                        </p>
+                                                    ) : null}
+                                                    <div className="mt-2">
+                                                        {hasCheckin ? (
+                                                            <div className="flex flex-col gap-1">
+                                                                <Badge className="w-fit bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                                                    Checked In
+                                                                </Badge>
+                                                                <span className="text-xs break-words text-slate-600 dark:text-slate-300">
+                                                                    {formatDateTime(
+                                                                        scannedAt,
+                                                                    )}
+                                                                </span>
+                                                            </div>
+                                                        ) : (
+                                                            <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                                                                Did Not Join
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-8 w-[72px] shrink-0 justify-center gap-1 px-2 text-xs"
+                                                    aria-expanded={isExpanded}
+                                                    onClick={() =>
+                                                        toggleExpandedRow(
+                                                            row.id,
+                                                        )
+                                                    }
+                                                >
+                                                    <ChevronDown
+                                                        className={cn(
+                                                            'h-3.5 w-3.5 transition-transform',
+                                                            isExpanded &&
+                                                                'rotate-180',
+                                                        )}
+                                                    />
+                                                    {isExpanded
+                                                        ? 'Less'
+                                                        : 'More'}
+                                                </Button>
+                                            </div>
+
+                                            {isExpanded ? (
+                                                <div className="border-t bg-slate-50/50 px-3 py-3 dark:bg-slate-900/20">
+                                                    <div className="grid gap-y-3">
+                                                        {isAsemme10Selected ? (
+                                                            <>
+                                                                <ReportDetailItem label="Badge Name">
+                                                                    {registration?.badge_name ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Organization">
+                                                                    {registration?.organization_name ??
+                                                                        row.organization_name ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Position">
+                                                                    {registration?.position_title ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Email">
+                                                                    {registration?.email ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Dietary Requirements">
+                                                                    {registration?.dietary_requirements ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Mobility or Special Needs">
+                                                                    {registration?.mobility_or_special_needs ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Focal Person">
+                                                                    {registration?.focal_name ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Focal Email">
+                                                                    {registration?.focal_email ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Focal Phone">
+                                                                    {registration?.focal_phone ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <ReportDetailItem label="Organization">
+                                                                    {row.organization_name ??
+                                                                        '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Welcome Dinner">
+                                                                    <Select
+                                                                        value={
+                                                                            (welcomeDinnerByUser[
+                                                                                row
+                                                                                    .id
+                                                                            ] ??
+                                                                            row.attend_welcome_dinner)
+                                                                                ? 'yes'
+                                                                                : 'no'
+                                                                        }
+                                                                        onValueChange={(
+                                                                            value,
+                                                                        ) => {
+                                                                            const nextWelcomeDinner =
+                                                                                value ===
+                                                                                'yes';
+                                                                            const currentTransport =
+                                                                                transportByUser[
+                                                                                    row
+                                                                                        .id
+                                                                                ] ??
+                                                                                row.avail_transport_from_makati_to_peninsula;
+                                                                            const nextTransport =
+                                                                                nextWelcomeDinner
+                                                                                    ? currentTransport
+                                                                                    : false;
+
+                                                                            setWelcomeDinnerByUser(
+                                                                                (
+                                                                                    prev,
+                                                                                ) => ({
+                                                                                    ...prev,
+                                                                                    [row.id]:
+                                                                                        nextWelcomeDinner,
+                                                                                }),
+                                                                            );
+                                                                            setTransportByUser(
+                                                                                (
+                                                                                    prev,
+                                                                                ) => ({
+                                                                                    ...prev,
+                                                                                    [row.id]:
+                                                                                        nextTransport,
+                                                                                }),
+                                                                            );
+
+                                                                            updateWelcomeDinnerPreferences(
+                                                                                row.id,
+                                                                                nextWelcomeDinner,
+                                                                                nextTransport,
+                                                                            );
+                                                                        }}
+                                                                        disabled={Boolean(
+                                                                            savingUserIds[
+                                                                                row
+                                                                                    .id
+                                                                            ],
+                                                                        )}
+                                                                    >
+                                                                        <SelectTrigger className="h-8 w-[90px]">
+                                                                            <SelectValue />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="yes">
+                                                                                YES
+                                                                            </SelectItem>
+                                                                            <SelectItem value="no">
+                                                                                NO
+                                                                            </SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Transportation">
+                                                                    <Select
+                                                                        value={
+                                                                            (transportByUser[
+                                                                                row
+                                                                                    .id
+                                                                            ] ??
+                                                                            row.avail_transport_from_makati_to_peninsula)
+                                                                                ? 'yes'
+                                                                                : 'no'
+                                                                        }
+                                                                        onValueChange={(
+                                                                            value,
+                                                                        ) => {
+                                                                            const currentWelcomeDinner =
+                                                                                welcomeDinnerByUser[
+                                                                                    row
+                                                                                        .id
+                                                                                ] ??
+                                                                                row.attend_welcome_dinner;
+                                                                            const nextTransport =
+                                                                                value ===
+                                                                                'yes';
+
+                                                                            setTransportByUser(
+                                                                                (
+                                                                                    prev,
+                                                                                ) => ({
+                                                                                    ...prev,
+                                                                                    [row.id]:
+                                                                                        nextTransport,
+                                                                                }),
+                                                                            );
+
+                                                                            updateWelcomeDinnerPreferences(
+                                                                                row.id,
+                                                                                currentWelcomeDinner,
+                                                                                nextTransport,
+                                                                            );
+                                                                        }}
+                                                                        disabled={
+                                                                            Boolean(
+                                                                                savingUserIds[
+                                                                                    row
+                                                                                        .id
+                                                                                ],
+                                                                            ) ||
+                                                                            !(
+                                                                                welcomeDinnerByUser[
+                                                                                    row
+                                                                                        .id
+                                                                                ] ??
+                                                                                row.attend_welcome_dinner
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <SelectTrigger className="h-8 w-[90px]">
+                                                                            <SelectValue />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="yes">
+                                                                                YES
+                                                                            </SelectItem>
+                                                                            <SelectItem value="no">
+                                                                                NO
+                                                                            </SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Table Assignment">
+                                                                    {getTableAssignment(
+                                                                        row,
+                                                                        selectedEventId,
+                                                                    ) ?? '-'}
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Vehicle Assignment">
+                                                                    {getVehicleAssignment(
+                                                                        row,
+                                                                        selectedEventId,
+                                                                    ) ?? '-'}
+                                                                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                                                        Plate:{' '}
+                                                                        {getVehiclePlateNumber(
+                                                                            row,
+                                                                            selectedEventId,
+                                                                        ) ??
+                                                                            '-'}
+                                                                    </p>
+                                                                </ReportDetailItem>
+                                                                <ReportDetailItem label="Notification">
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        onClick={() =>
+                                                                            handleSendNotification(
+                                                                                row,
+                                                                            )
+                                                                        }
+                                                                        disabled={
+                                                                            disableNotificationButton
+                                                                        }
+                                                                        className={cn(
+                                                                            notificationSentAt
+                                                                                ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white'
+                                                                                : '',
+                                                                        )}
+                                                                    >
+                                                                        {sendingNotificationByUser[
+                                                                            row
+                                                                                .id
+                                                                        ]
+                                                                            ? 'Sending...'
+                                                                            : 'Email'}
+                                                                    </Button>
+                                                                    {notificationSentAt ? (
+                                                                        <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
+                                                                            Sent:{' '}
+                                                                            {formatDateTime(
+                                                                                notificationSentAt,
+                                                                            )}
+                                                                        </p>
+                                                                    ) : null}
+                                                                </ReportDetailItem>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    );
+                                })
+                            ) : (
+                                <div className="px-3 py-8 text-center text-sm text-slate-500">
+                                    No participants found.
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="hidden overflow-hidden rounded-md border sm:block">
+                            <Table className="w-full table-fixed">
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead className="w-16">
-                                            Seq
-                                        </TableHead>
-                                        <TableHead>Name</TableHead>
-                                        <TableHead>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                className="-ml-3 h-8 gap-1 px-3 font-semibold"
-                                                onClick={() =>
-                                                    setRegistrantTypeSort(
-                                                        (prev) =>
-                                                            prev === 'none'
-                                                                ? 'asc'
-                                                                : prev === 'asc'
-                                                                  ? 'desc'
-                                                                  : 'none',
-                                                    )
-                                                }
-                                            >
-                                                Registrant Type
-                                                <ArrowUpDown className="h-3.5 w-3.5" />
-                                                <span className="text-[11px] text-slate-500">
-                                                    {registrantTypeSort ===
-                                                    'none'
-                                                        ? 'Default'
-                                                        : registrantTypeSort ===
-                                                            'asc'
-                                                          ? 'A-Z'
-                                                          : 'Z-A'}
-                                                </span>
-                                            </Button>
-                                        </TableHead>
-                                        <TableHead>Organization</TableHead>
-                                        <TableHead>Welcome Dinner</TableHead>
-                                        <TableHead>Transportation</TableHead>
-                                        <TableHead>Table Assignment</TableHead>
-                                        <TableHead>
-                                            Vehicle Assignment
-                                        </TableHead>
-                                        <TableHead>Notification</TableHead>
-                                        <TableHead>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                className="-ml-3 h-8 gap-1 px-3 font-semibold"
-                                                onClick={() =>
-                                                    setCheckinSort((prev) =>
-                                                        prev === 'desc'
-                                                            ? 'asc'
-                                                            : 'desc',
-                                                    )
-                                                }
-                                            >
-                                                Check-in (Date and Time)
-                                                <ArrowUpDown className="h-3.5 w-3.5" />
-                                                <span className="text-[11px] text-slate-500">
-                                                    {checkinSort === 'desc'
-                                                        ? 'Newest'
-                                                        : 'Oldest'}
-                                                </span>
-                                            </Button>
-                                        </TableHead>
+                                        {isAsemme10Selected ? (
+                                            <>
+                                                <TableHead className="hidden w-14 sm:table-cell">
+                                                    Seq
+                                                </TableHead>
+                                                <TableHead>
+                                                    Participant
+                                                </TableHead>
+                                                <TableHead className="hidden md:table-cell">
+                                                    Country
+                                                </TableHead>
+                                                <TableHead className="hidden lg:table-cell">
+                                                    Registration Type
+                                                </TableHead>
+                                                <TableHead className="hidden lg:table-cell">
+                                                    Role
+                                                </TableHead>
+                                                <TableHead className="hidden sm:table-cell">
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="-ml-3 h-8 gap-1 px-3 font-semibold"
+                                                        onClick={() =>
+                                                            setCheckinSort(
+                                                                (prev) =>
+                                                                    prev ===
+                                                                    'desc'
+                                                                        ? 'asc'
+                                                                        : 'desc',
+                                                            )
+                                                        }
+                                                    >
+                                                        Check-in
+                                                        <ArrowUpDown className="h-3.5 w-3.5" />
+                                                        <span className="text-[11px] text-slate-500">
+                                                            {checkinSort ===
+                                                            'desc'
+                                                                ? 'Newest'
+                                                                : 'Oldest'}
+                                                        </span>
+                                                    </Button>
+                                                </TableHead>
+                                                <TableHead className="hidden w-20 text-right sm:table-cell sm:w-32">
+                                                    Details
+                                                </TableHead>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <TableHead className="hidden w-14 sm:table-cell">
+                                                    Seq
+                                                </TableHead>
+                                                <TableHead>Name</TableHead>
+                                                <TableHead className="hidden md:table-cell">
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="-ml-3 h-8 gap-1 px-3 font-semibold"
+                                                        onClick={() =>
+                                                            setRegistrantTypeSort(
+                                                                (prev) =>
+                                                                    prev ===
+                                                                    'none'
+                                                                        ? 'asc'
+                                                                        : prev ===
+                                                                            'asc'
+                                                                          ? 'desc'
+                                                                          : 'none',
+                                                            )
+                                                        }
+                                                    >
+                                                        Registrant Type
+                                                        <ArrowUpDown className="h-3.5 w-3.5" />
+                                                        <span className="text-[11px] text-slate-500">
+                                                            {registrantTypeSort ===
+                                                            'none'
+                                                                ? 'Default'
+                                                                : registrantTypeSort ===
+                                                                    'asc'
+                                                                  ? 'A-Z'
+                                                                  : 'Z-A'}
+                                                        </span>
+                                                    </Button>
+                                                </TableHead>
+                                                <TableHead className="hidden sm:table-cell">
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="-ml-3 h-8 gap-1 px-3 font-semibold"
+                                                        onClick={() =>
+                                                            setCheckinSort(
+                                                                (prev) =>
+                                                                    prev ===
+                                                                    'desc'
+                                                                        ? 'asc'
+                                                                        : 'desc',
+                                                            )
+                                                        }
+                                                    >
+                                                        Check-in (Date and Time)
+                                                        <ArrowUpDown className="h-3.5 w-3.5" />
+                                                        <span className="text-[11px] text-slate-500">
+                                                            {checkinSort ===
+                                                            'desc'
+                                                                ? 'Newest'
+                                                                : 'Oldest'}
+                                                        </span>
+                                                    </Button>
+                                                </TableHead>
+                                                <TableHead className="hidden w-20 text-right sm:table-cell sm:w-32">
+                                                    Details
+                                                </TableHead>
+                                            </>
+                                        )}
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1333,244 +2197,564 @@ export default function Reports({
                                                 !notificationEventId ||
                                                 (!selectedEventId &&
                                                     hasAnyNotificationSentAt);
+                                            const isExpanded =
+                                                expandedRowIds.has(row.id);
+                                            const seq =
+                                                (currentPage - 1) *
+                                                    entriesPerPage +
+                                                index +
+                                                1;
+
+                                            if (isAsemme10Selected) {
+                                                const registration =
+                                                    getAsemme10Registration(
+                                                        row,
+                                                        selectedEventId,
+                                                    );
+
+                                                return (
+                                                    <React.Fragment
+                                                        key={row.id}
+                                                    >
+                                                        <TableRow
+                                                            className={cn(
+                                                                'align-top',
+                                                                isExpanded &&
+                                                                    'border-b-0',
+                                                            )}
+                                                        >
+                                                            <TableCell className="hidden sm:table-cell">
+                                                                {seq}
+                                                            </TableCell>
+                                                            <TableCell className="px-2 py-3 sm:px-4">
+                                                                <div className="flex min-w-0 items-start gap-2">
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="font-medium break-words text-slate-900 dark:text-slate-100">
+                                                                            {displayAsemme10Name(
+                                                                                row,
+                                                                                registration,
+                                                                            )}
+                                                                        </p>
+                                                                        <p className="text-xs break-all text-slate-500 dark:text-slate-400">
+                                                                            ID:{' '}
+                                                                            {row.display_id ??
+                                                                                row.id}
+                                                                        </p>
+                                                                        <div className="mt-2 sm:hidden">
+                                                                            {hasCheckin ? (
+                                                                                <div className="flex flex-col gap-1">
+                                                                                    <Badge className="w-fit bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                                                                        Checked
+                                                                                        In
+                                                                                    </Badge>
+                                                                                    <span className="text-xs break-words text-slate-600 dark:text-slate-300">
+                                                                                        {formatDateTime(
+                                                                                            scannedAt,
+                                                                                        )}
+                                                                                    </span>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                                                                                    Did
+                                                                                    Not
+                                                                                    Join
+                                                                                </Badge>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        className="ml-auto h-8 w-[72px] shrink-0 justify-center gap-1 px-2 text-xs sm:hidden"
+                                                                        aria-expanded={
+                                                                            isExpanded
+                                                                        }
+                                                                        onClick={() =>
+                                                                            toggleExpandedRow(
+                                                                                row.id,
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <ChevronDown
+                                                                            className={cn(
+                                                                                'h-3.5 w-3.5 transition-transform',
+                                                                                isExpanded &&
+                                                                                    'rotate-180',
+                                                                            )}
+                                                                        />
+                                                                        {isExpanded
+                                                                            ? 'Less'
+                                                                            : 'More'}
+                                                                    </Button>
+                                                                </div>
+                                                            </TableCell>
+                                                            <TableCell className="hidden break-words md:table-cell">
+                                                                {row.country_name ??
+                                                                    '-'}
+                                                            </TableCell>
+                                                            <TableCell className="hidden break-words lg:table-cell">
+                                                                {registration?.registration_type ??
+                                                                    '-'}
+                                                            </TableCell>
+                                                            <TableCell className="hidden break-words lg:table-cell">
+                                                                {displayAsemme10Role(
+                                                                    registration?.role,
+                                                                )}
+                                                            </TableCell>
+                                                            <TableCell className="hidden px-2 py-3 sm:table-cell sm:px-4">
+                                                                {hasCheckin ? (
+                                                                    <div className="flex flex-col gap-1">
+                                                                        <Badge className="w-fit bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                                                            Checked
+                                                                            In
+                                                                        </Badge>
+                                                                        <span className="text-xs break-words text-slate-600 dark:text-slate-300">
+                                                                            {formatDateTime(
+                                                                                scannedAt,
+                                                                            )}
+                                                                        </span>
+                                                                    </div>
+                                                                ) : (
+                                                                    <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                                                                        Did Not
+                                                                        Join
+                                                                    </Badge>
+                                                                )}
+                                                            </TableCell>
+                                                            <TableCell className="hidden px-2 py-3 text-right sm:table-cell sm:px-4">
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className="h-8 gap-1 px-2 text-xs sm:px-3"
+                                                                    aria-expanded={
+                                                                        isExpanded
+                                                                    }
+                                                                    onClick={() =>
+                                                                        toggleExpandedRow(
+                                                                            row.id,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <ChevronDown
+                                                                        className={cn(
+                                                                            'h-3.5 w-3.5 transition-transform',
+                                                                            isExpanded &&
+                                                                                'rotate-180',
+                                                                        )}
+                                                                    />
+                                                                    {isExpanded
+                                                                        ? 'Collapse'
+                                                                        : 'View all'}
+                                                                </Button>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                        {isExpanded ? (
+                                                            <TableRow className="border-b bg-slate-50/50 dark:bg-slate-900/20">
+                                                                <TableCell
+                                                                    colSpan={7}
+                                                                    className="px-3 py-3 sm:px-6"
+                                                                >
+                                                                    <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                                                        <ReportDetailItem label="Badge Name">
+                                                                            {registration?.badge_name ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                        <ReportDetailItem label="Organization">
+                                                                            {registration?.organization_name ??
+                                                                                row.organization_name ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                        <ReportDetailItem label="Position">
+                                                                            {registration?.position_title ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                        <ReportDetailItem label="Email">
+                                                                            {registration?.email ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                        <ReportDetailItem label="Dietary Requirements">
+                                                                            {registration?.dietary_requirements ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                        <ReportDetailItem label="Mobility or Special Needs">
+                                                                            {registration?.mobility_or_special_needs ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                        <ReportDetailItem label="Focal Person">
+                                                                            {registration?.focal_name ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                        <ReportDetailItem label="Focal Email">
+                                                                            {registration?.focal_email ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                        <ReportDetailItem label="Focal Phone">
+                                                                            {registration?.focal_phone ??
+                                                                                '-'}
+                                                                        </ReportDetailItem>
+                                                                    </div>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ) : null}
+                                                    </React.Fragment>
+                                                );
+                                            }
 
                                             return (
-                                                <TableRow key={row.id}>
-                                                    <TableCell>
-                                                        {(currentPage - 1) *
-                                                            entriesPerPage +
-                                                            index +
-                                                            1}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <div className="min-w-[240px]">
-                                                            <p className="font-medium text-slate-900 dark:text-slate-100">
-                                                                {buildDisplayName(
-                                                                    row,
-                                                                )}
-                                                            </p>
-                                                            <p className="text-xs text-slate-500 dark:text-slate-400">
-                                                                {row.country_name ??
-                                                                    '—'}
-                                                            </p>
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        {displayRegistrantType(
-                                                            row,
+                                                <React.Fragment key={row.id}>
+                                                    <TableRow
+                                                        className={cn(
+                                                            'align-top',
+                                                            isExpanded &&
+                                                                'border-b-0',
                                                         )}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        {row.organization_name ??
-                                                            '—'}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Select
-                                                            value={
-                                                                (welcomeDinnerByUser[
-                                                                    row.id
-                                                                ] ??
-                                                                row.attend_welcome_dinner)
-                                                                    ? 'yes'
-                                                                    : 'no'
-                                                            }
-                                                            onValueChange={(
-                                                                value,
-                                                            ) => {
-                                                                const nextWelcomeDinner =
-                                                                    value ===
-                                                                    'yes';
-                                                                const currentTransport =
-                                                                    transportByUser[
-                                                                        row.id
-                                                                    ] ??
-                                                                    row.avail_transport_from_makati_to_peninsula;
-                                                                const nextTransport =
-                                                                    nextWelcomeDinner
-                                                                        ? currentTransport
-                                                                        : false;
-
-                                                                setWelcomeDinnerByUser(
-                                                                    (prev) => ({
-                                                                        ...prev,
-                                                                        [row.id]:
-                                                                            nextWelcomeDinner,
-                                                                    }),
-                                                                );
-                                                                setTransportByUser(
-                                                                    (prev) => ({
-                                                                        ...prev,
-                                                                        [row.id]:
-                                                                            nextTransport,
-                                                                    }),
-                                                                );
-
-                                                                updateWelcomeDinnerPreferences(
-                                                                    row.id,
-                                                                    nextWelcomeDinner,
-                                                                    nextTransport,
-                                                                );
-                                                            }}
-                                                            disabled={Boolean(
-                                                                savingUserIds[
-                                                                    row.id
-                                                                ],
-                                                            )}
-                                                        >
-                                                            <SelectTrigger className="h-8 w-[90px]">
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="yes">
-                                                                    YES
-                                                                </SelectItem>
-                                                                <SelectItem value="no">
-                                                                    NO
-                                                                </SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Select
-                                                            value={
-                                                                (transportByUser[
-                                                                    row.id
-                                                                ] ??
-                                                                row.avail_transport_from_makati_to_peninsula)
-                                                                    ? 'yes'
-                                                                    : 'no'
-                                                            }
-                                                            onValueChange={(
-                                                                value,
-                                                            ) => {
-                                                                const currentWelcomeDinner =
-                                                                    welcomeDinnerByUser[
-                                                                        row.id
-                                                                    ] ??
-                                                                    row.attend_welcome_dinner;
-                                                                const nextTransport =
-                                                                    value ===
-                                                                    'yes';
-
-                                                                setTransportByUser(
-                                                                    (prev) => ({
-                                                                        ...prev,
-                                                                        [row.id]:
-                                                                            nextTransport,
-                                                                    }),
-                                                                );
-
-                                                                updateWelcomeDinnerPreferences(
-                                                                    row.id,
-                                                                    currentWelcomeDinner,
-                                                                    nextTransport,
-                                                                );
-                                                            }}
-                                                            disabled={
-                                                                Boolean(
-                                                                    savingUserIds[
-                                                                        row.id
-                                                                    ],
-                                                                ) ||
-                                                                !(
-                                                                    welcomeDinnerByUser[
-                                                                        row.id
-                                                                    ] ??
-                                                                    row.attend_welcome_dinner
-                                                                )
-                                                            }
-                                                        >
-                                                            <SelectTrigger className="h-8 w-[90px]">
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="yes">
-                                                                    YES
-                                                                </SelectItem>
-                                                                <SelectItem value="no">
-                                                                    NO
-                                                                </SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        {getTableAssignment(
-                                                            row,
-                                                            selectedEventId,
-                                                        ) ?? '—'}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        {getVehicleAssignment(
-                                                            row,
-                                                            selectedEventId,
-                                                        ) ?? '—'}
-                                                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                                                            Plate:{' '}
-                                                            {getVehiclePlateNumber(
-                                                                row,
-                                                                selectedEventId,
-                                                            ) ?? '—'}
-                                                        </p>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            variant="outline"
-                                                            onClick={() =>
-                                                                handleSendNotification(
-                                                                    row,
-                                                                )
-                                                            }
-                                                            disabled={
-                                                                disableNotificationButton
-                                                            }
-                                                            className={cn(
-                                                                notificationSentAt
-                                                                    ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white'
-                                                                    : '',
-                                                            )}
-                                                        >
-                                                            {sendingNotificationByUser[
-                                                                row.id
-                                                            ]
-                                                                ? 'Sending...'
-                                                                : 'Email'}
-                                                        </Button>
-                                                        {notificationSentAt ? (
-                                                            <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
-                                                                Sent:{' '}
-                                                                {formatDateTime(
-                                                                    notificationSentAt,
-                                                                )}
-                                                            </p>
-                                                        ) : null}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        {hasCheckin ? (
-                                                            <div className="flex flex-col gap-1">
-                                                                <Badge className="w-fit bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
-                                                                    Checked In
-                                                                </Badge>
-                                                                <span className="text-xs text-slate-600 dark:text-slate-300">
-                                                                    {formatDateTime(
-                                                                        scannedAt,
-                                                                    )}
-                                                                </span>
+                                                    >
+                                                        <TableCell className="hidden sm:table-cell">
+                                                            {seq}
+                                                        </TableCell>
+                                                        <TableCell className="px-2 py-3 sm:px-4">
+                                                            <div className="flex w-full min-w-0 items-start justify-between gap-2 sm:block">
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="font-medium break-words text-slate-900 dark:text-slate-100">
+                                                                        {buildDisplayName(
+                                                                            row,
+                                                                        )}
+                                                                    </p>
+                                                                    <p className="text-xs break-words text-slate-500 dark:text-slate-400">
+                                                                        {row.country_name ??
+                                                                            '-'}
+                                                                    </p>
+                                                                    <p className="mt-1 text-xs break-words text-slate-500 md:hidden dark:text-slate-400">
+                                                                        {displayRegistrantType(
+                                                                            row,
+                                                                        )}
+                                                                    </p>
+                                                                    <div className="mt-2 sm:hidden">
+                                                                        {hasCheckin ? (
+                                                                            <div className="flex flex-col gap-1">
+                                                                                <Badge className="w-fit bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                                                                    Checked
+                                                                                    In
+                                                                                </Badge>
+                                                                                <span className="text-xs break-words text-slate-600 dark:text-slate-300">
+                                                                                    {formatDateTime(
+                                                                                        scannedAt,
+                                                                                    )}
+                                                                                </span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                                                                                Did
+                                                                                Not
+                                                                                Join
+                                                                            </Badge>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className="ml-auto h-8 w-[72px] shrink-0 justify-center gap-1 px-2 text-xs sm:hidden"
+                                                                    aria-expanded={
+                                                                        isExpanded
+                                                                    }
+                                                                    onClick={() =>
+                                                                        toggleExpandedRow(
+                                                                            row.id,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <ChevronDown
+                                                                        className={cn(
+                                                                            'h-3.5 w-3.5 transition-transform',
+                                                                            isExpanded &&
+                                                                                'rotate-180',
+                                                                        )}
+                                                                    />
+                                                                    {isExpanded
+                                                                        ? 'Less'
+                                                                        : 'More'}
+                                                                </Button>
                                                             </div>
-                                                        ) : (
-                                                            <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
-                                                                Did Not Join
-                                                            </Badge>
-                                                        )}
-                                                    </TableCell>
-                                                </TableRow>
+                                                        </TableCell>
+                                                        <TableCell className="hidden break-words md:table-cell">
+                                                            {displayRegistrantType(
+                                                                row,
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell className="hidden px-2 py-3 sm:table-cell sm:px-4">
+                                                            {hasCheckin ? (
+                                                                <div className="flex flex-col gap-1">
+                                                                    <Badge className="w-fit bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                                                        Checked
+                                                                        In
+                                                                    </Badge>
+                                                                    <span className="text-xs break-words text-slate-600 dark:text-slate-300">
+                                                                        {formatDateTime(
+                                                                            scannedAt,
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                            ) : (
+                                                                <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                                                                    Did Not Join
+                                                                </Badge>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell className="hidden px-2 py-3 text-right sm:table-cell sm:px-4">
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-8 gap-1 px-2 text-xs sm:px-3"
+                                                                aria-expanded={
+                                                                    isExpanded
+                                                                }
+                                                                onClick={() =>
+                                                                    toggleExpandedRow(
+                                                                        row.id,
+                                                                    )
+                                                                }
+                                                            >
+                                                                <ChevronDown
+                                                                    className={cn(
+                                                                        'h-3.5 w-3.5 transition-transform',
+                                                                        isExpanded &&
+                                                                            'rotate-180',
+                                                                    )}
+                                                                />
+                                                                {isExpanded
+                                                                    ? 'Collapse'
+                                                                    : 'View all'}
+                                                            </Button>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                    {isExpanded ? (
+                                                        <TableRow className="border-b bg-slate-50/50 dark:bg-slate-900/20">
+                                                            <TableCell
+                                                                colSpan={5}
+                                                                className="px-3 py-3 sm:px-6"
+                                                            >
+                                                                <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                                                    <ReportDetailItem label="Organization">
+                                                                        {row.organization_name ??
+                                                                            '-'}
+                                                                    </ReportDetailItem>
+                                                                    <ReportDetailItem label="Welcome Dinner">
+                                                                        <Select
+                                                                            value={
+                                                                                (welcomeDinnerByUser[
+                                                                                    row
+                                                                                        .id
+                                                                                ] ??
+                                                                                row.attend_welcome_dinner)
+                                                                                    ? 'yes'
+                                                                                    : 'no'
+                                                                            }
+                                                                            onValueChange={(
+                                                                                value,
+                                                                            ) => {
+                                                                                const nextWelcomeDinner =
+                                                                                    value ===
+                                                                                    'yes';
+                                                                                const currentTransport =
+                                                                                    transportByUser[
+                                                                                        row
+                                                                                            .id
+                                                                                    ] ??
+                                                                                    row.avail_transport_from_makati_to_peninsula;
+                                                                                const nextTransport =
+                                                                                    nextWelcomeDinner
+                                                                                        ? currentTransport
+                                                                                        : false;
+
+                                                                                setWelcomeDinnerByUser(
+                                                                                    (
+                                                                                        prev,
+                                                                                    ) => ({
+                                                                                        ...prev,
+                                                                                        [row.id]:
+                                                                                            nextWelcomeDinner,
+                                                                                    }),
+                                                                                );
+                                                                                setTransportByUser(
+                                                                                    (
+                                                                                        prev,
+                                                                                    ) => ({
+                                                                                        ...prev,
+                                                                                        [row.id]:
+                                                                                            nextTransport,
+                                                                                    }),
+                                                                                );
+
+                                                                                updateWelcomeDinnerPreferences(
+                                                                                    row.id,
+                                                                                    nextWelcomeDinner,
+                                                                                    nextTransport,
+                                                                                );
+                                                                            }}
+                                                                            disabled={Boolean(
+                                                                                savingUserIds[
+                                                                                    row
+                                                                                        .id
+                                                                                ],
+                                                                            )}
+                                                                        >
+                                                                            <SelectTrigger className="h-8 w-[90px]">
+                                                                                <SelectValue />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                <SelectItem value="yes">
+                                                                                    YES
+                                                                                </SelectItem>
+                                                                                <SelectItem value="no">
+                                                                                    NO
+                                                                                </SelectItem>
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    </ReportDetailItem>
+                                                                    <ReportDetailItem label="Transportation">
+                                                                        <Select
+                                                                            value={
+                                                                                (transportByUser[
+                                                                                    row
+                                                                                        .id
+                                                                                ] ??
+                                                                                row.avail_transport_from_makati_to_peninsula)
+                                                                                    ? 'yes'
+                                                                                    : 'no'
+                                                                            }
+                                                                            onValueChange={(
+                                                                                value,
+                                                                            ) => {
+                                                                                const currentWelcomeDinner =
+                                                                                    welcomeDinnerByUser[
+                                                                                        row
+                                                                                            .id
+                                                                                    ] ??
+                                                                                    row.attend_welcome_dinner;
+                                                                                const nextTransport =
+                                                                                    value ===
+                                                                                    'yes';
+
+                                                                                setTransportByUser(
+                                                                                    (
+                                                                                        prev,
+                                                                                    ) => ({
+                                                                                        ...prev,
+                                                                                        [row.id]:
+                                                                                            nextTransport,
+                                                                                    }),
+                                                                                );
+
+                                                                                updateWelcomeDinnerPreferences(
+                                                                                    row.id,
+                                                                                    currentWelcomeDinner,
+                                                                                    nextTransport,
+                                                                                );
+                                                                            }}
+                                                                            disabled={
+                                                                                Boolean(
+                                                                                    savingUserIds[
+                                                                                        row
+                                                                                            .id
+                                                                                    ],
+                                                                                ) ||
+                                                                                !(
+                                                                                    welcomeDinnerByUser[
+                                                                                        row
+                                                                                            .id
+                                                                                    ] ??
+                                                                                    row.attend_welcome_dinner
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <SelectTrigger className="h-8 w-[90px]">
+                                                                                <SelectValue />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                <SelectItem value="yes">
+                                                                                    YES
+                                                                                </SelectItem>
+                                                                                <SelectItem value="no">
+                                                                                    NO
+                                                                                </SelectItem>
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    </ReportDetailItem>
+                                                                    <ReportDetailItem label="Table Assignment">
+                                                                        {getTableAssignment(
+                                                                            row,
+                                                                            selectedEventId,
+                                                                        ) ??
+                                                                            '-'}
+                                                                    </ReportDetailItem>
+                                                                    <ReportDetailItem label="Vehicle Assignment">
+                                                                        {getVehicleAssignment(
+                                                                            row,
+                                                                            selectedEventId,
+                                                                        ) ??
+                                                                            '-'}
+                                                                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                                                            Plate:{' '}
+                                                                            {getVehiclePlateNumber(
+                                                                                row,
+                                                                                selectedEventId,
+                                                                            ) ??
+                                                                                '-'}
+                                                                        </p>
+                                                                    </ReportDetailItem>
+                                                                    <ReportDetailItem label="Notification">
+                                                                        <Button
+                                                                            type="button"
+                                                                            size="sm"
+                                                                            variant="outline"
+                                                                            onClick={() =>
+                                                                                handleSendNotification(
+                                                                                    row,
+                                                                                )
+                                                                            }
+                                                                            disabled={
+                                                                                disableNotificationButton
+                                                                            }
+                                                                            className={cn(
+                                                                                notificationSentAt
+                                                                                    ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white'
+                                                                                    : '',
+                                                                            )}
+                                                                        >
+                                                                            {sendingNotificationByUser[
+                                                                                row
+                                                                                    .id
+                                                                            ]
+                                                                                ? 'Sending...'
+                                                                                : 'Email'}
+                                                                        </Button>
+                                                                        {notificationSentAt ? (
+                                                                            <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
+                                                                                Sent:{' '}
+                                                                                {formatDateTime(
+                                                                                    notificationSentAt,
+                                                                                )}
+                                                                            </p>
+                                                                        ) : null}
+                                                                    </ReportDetailItem>
+                                                                </div>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ) : null}
+                                                </React.Fragment>
                                             );
                                         })
                                     ) : (
                                         <TableRow>
                                             <TableCell
-                                                colSpan={11}
+                                                colSpan={
+                                                    isAsemme10Selected ? 7 : 5
+                                                }
                                                 className="text-center text-slate-500"
                                             >
                                                 No participants found.

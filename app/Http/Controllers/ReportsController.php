@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AssignmentNotificationLog;
+use App\Models\EventRegistrationAttendee;
 use App\Models\ParticipantAttendance;
 use App\Models\ParticipantTableAssignment;
 use App\Models\Programme;
@@ -16,6 +17,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class ReportsController extends Controller
@@ -227,6 +229,11 @@ Please be informed of the following:
             ->orderBy('starts_at')
             ->get();
         $defaultEventId = EventDefaults::defaultEventId($programmeEvents);
+        $asemme10ProgrammeIds = $programmeEvents
+            ->filter(fn (Programme $programme) => $this->isAsemme10Programme($programme))
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
 
         $events = $programmeEvents
             ->map(fn (Programme $programme) => [
@@ -265,6 +272,22 @@ Please be informed of the following:
             ->groupBy('user_id')
             ->map(fn ($group) => $group->pluck('programme_id')->map(fn ($id) => (int) $id)->values());
 
+        if ($asemme10ProgrammeIds->isNotEmpty()) {
+            $asemme10JoinedByUser = EventRegistrationAttendee::query()
+                ->whereIn('event_registration_attendees.programme_id', $asemme10ProgrammeIds)
+                ->select('event_registration_attendees.user_id', 'event_registration_attendees.programme_id')
+                ->get()
+                ->groupBy('user_id')
+                ->map(fn ($group) => $group->pluck('programme_id')->map(fn ($id) => (int) $id)->unique()->values());
+
+            $asemme10JoinedByUser->each(function ($programmeIds, $userId) use (&$joinedByUser) {
+                $joinedByUser[$userId] = ($joinedByUser->get($userId) ?? collect())
+                    ->merge($programmeIds)
+                    ->unique()
+                    ->values();
+            });
+        }
+
         $attendanceEntriesByUser = ParticipantAttendance::query()
             ->join('users', 'participant_attendances.user_id', '=', 'users.id')
             ->where('users.is_active', true)
@@ -276,6 +299,24 @@ Please be informed of the following:
             ->orderBy('participant_attendances.scanned_at')
             ->get()
             ->groupBy('user_id');
+
+        if ($asemme10ProgrammeIds->isNotEmpty()) {
+            $asemme10AttendanceEntriesByUser = ParticipantAttendance::query()
+                ->whereIn('programme_id', $asemme10ProgrammeIds)
+                ->whereNotNull('scanned_at')
+                ->select('user_id', 'programme_id', 'scanned_at')
+                ->orderBy('scanned_at')
+                ->get()
+                ->groupBy('user_id');
+
+            $asemme10AttendanceEntriesByUser->each(function ($entries, $userId) use (&$attendanceEntriesByUser) {
+                $attendanceEntriesByUser[$userId] = ($attendanceEntriesByUser->get($userId) ?? collect())
+                    ->merge($entries)
+                    ->unique(fn ($entry) => $entry->programme_id)
+                    ->sortBy('scanned_at')
+                    ->values();
+            });
+        }
 
         $tableAssignmentsByUser = ParticipantTableAssignment::query()
             ->join('participant_tables', 'participant_table_assignments.participant_table_id', '=', 'participant_tables.id')
@@ -322,7 +363,158 @@ Please be informed of the following:
             ->get()
             ->groupBy('user_id');
 
-        $rows = User::query()
+        $asemme10RegistrationByUser = EventRegistrationAttendee::query()
+            ->join('event_registration_submissions', 'event_registration_attendees.submission_id', '=', 'event_registration_submissions.id')
+            ->select([
+                'event_registration_attendees.id',
+                'event_registration_attendees.user_id',
+                'event_registration_attendees.programme_id',
+                'event_registration_attendees.role',
+                'event_registration_attendees.title',
+                'event_registration_attendees.given_name',
+                'event_registration_attendees.family_name',
+                'event_registration_attendees.badge_name',
+                'event_registration_attendees.organization_name',
+                'event_registration_attendees.position_title',
+                'event_registration_attendees.email',
+                'event_registration_attendees.dietary_requirements',
+                'event_registration_attendees.mobility_or_special_needs',
+                'event_registration_attendees.created_at',
+                'event_registration_submissions.registration_type',
+                'event_registration_submissions.focal_name',
+                'event_registration_submissions.focal_email',
+                'event_registration_submissions.focal_phone',
+                'event_registration_submissions.focal_organization',
+                'event_registration_submissions.focal_position',
+                'event_registration_submissions.submitted_at',
+                'event_registration_submissions.status',
+            ])
+            ->orderBy('event_registration_attendees.created_at')
+            ->get()
+            ->groupBy('user_id');
+
+        $buildReportRow = function ($row) use ($joinedByUser, $attendanceEntriesByUser, $tableAssignmentsByUser, $vehicleAssignmentsByUser, $assignmentNotificationByUser, $asemme10RegistrationByUser) {
+            $joinedProgrammeIds = ($joinedByUser->get($row->id) ?? collect())->values();
+            $attendanceEntries = $attendanceEntriesByUser->get($row->id, collect());
+            $tableAssignments = $tableAssignmentsByUser->get($row->id, collect());
+            $vehicleAssignments = $vehicleAssignmentsByUser->get($row->id, collect());
+            $assignmentNotificationEntries = $assignmentNotificationByUser->get($row->id, collect());
+            $asemme10RegistrationEntries = $asemme10RegistrationByUser->get($row->id, collect());
+
+            $attendedProgrammeIds = $attendanceEntries
+                ->pluck('programme_id')
+                ->unique()
+                ->map(fn ($id) => (int) $id)
+                ->values();
+
+            $attendanceByProgramme = $attendanceEntries
+                ->groupBy('programme_id')
+                ->map(function ($entries) {
+                    $latest = $entries->last();
+
+                    return $latest?->scanned_at?->toISOString();
+                })
+                ->all();
+
+            $latestAttendance = $attendanceEntries->last();
+            $latestTableAssignment = $tableAssignments->last();
+            $latestVehicleAssignment = $vehicleAssignments->last();
+
+            $tableAssignmentByProgramme = $tableAssignments
+                ->groupBy('programme_id')
+                ->map(fn ($entries) => $entries->last()?->table_number)
+                ->all();
+
+            $vehicleAssignmentByProgramme = $vehicleAssignments
+                ->groupBy('programme_id')
+                ->map(function ($entries) {
+                    $latest = $entries->last();
+
+                    return $latest?->transport_vehicle_label ?: $latest?->vehicle_label;
+                })
+                ->all();
+
+            $vehiclePlateNumberByProgramme = $vehicleAssignments
+                ->groupBy('programme_id')
+                ->map(fn ($entries) => $entries->last()?->transport_vehicle_plate_number)
+                ->all();
+
+            $notificationSentAtByProgramme = $assignmentNotificationEntries
+                ->groupBy('programme_id')
+                ->map(fn ($entries) => $entries->last()?->sent_at?->toISOString())
+                ->all();
+
+            $asemme10RegistrationByProgramme = $asemme10RegistrationEntries
+                ->groupBy('programme_id')
+                ->map(function ($entries) {
+                    $latest = $entries->last();
+
+                    if (! $latest) {
+                        return null;
+                    }
+
+                    return [
+                        'attendee_id' => $latest->id,
+                        'role' => $latest->role,
+                        'title' => $latest->title,
+                        'given_name' => $latest->given_name,
+                        'family_name' => $latest->family_name,
+                        'badge_name' => $latest->badge_name,
+                        'organization_name' => $latest->organization_name,
+                        'position_title' => $latest->position_title,
+                        'email' => $latest->email,
+                        'dietary_requirements' => $latest->dietary_requirements,
+                        'mobility_or_special_needs' => $latest->mobility_or_special_needs,
+                        'registration_type' => $latest->registration_type,
+                        'focal_name' => $latest->focal_name,
+                        'focal_email' => $latest->focal_email,
+                        'focal_phone' => $latest->focal_phone,
+                        'focal_organization' => $latest->focal_organization,
+                        'focal_position' => $latest->focal_position,
+                        'submitted_at' => $latest->submitted_at
+                            ? \Illuminate\Support\Carbon::parse($latest->submitted_at)->toISOString()
+                            : null,
+                        'status' => $latest->status,
+                    ];
+                })
+                ->all();
+
+            $latestAsemme10Registration = collect($asemme10RegistrationByProgramme)
+                ->filter()
+                ->last();
+
+            return [
+                'id' => $row->id,
+                'honorific_title' => $row->honorific_title,
+                'given_name' => $row->given_name,
+                'family_name' => $row->family_name,
+                'suffix' => $row->suffix,
+                'name' => $row->name,
+                'display_id' => $row->display_id,
+                'country_name' => $row->country_name,
+                'registrant_type' => $row->registrant_type,
+                'organization_name' => $row->organization_name,
+                'other_user_type' => $row->other_user_type,
+                'attend_welcome_dinner' => (bool) $row->attend_welcome_dinner,
+                'avail_transport_from_makati_to_peninsula' => (bool) $row->avail_transport_from_makati_to_peninsula,
+                'table_assignment' => $latestTableAssignment?->table_number,
+                'table_assignment_by_programme' => $tableAssignmentByProgramme,
+                'vehicle_assignment' => $latestVehicleAssignment?->transport_vehicle_label ?: $latestVehicleAssignment?->vehicle_label,
+                'vehicle_assignment_by_programme' => $vehicleAssignmentByProgramme,
+                'vehicle_plate_number' => $latestVehicleAssignment?->transport_vehicle_plate_number,
+                'vehicle_plate_number_by_programme' => $vehiclePlateNumberByProgramme,
+                'notification_sent_at_by_programme' => $notificationSentAtByProgramme,
+                'asemme10_registration' => $latestAsemme10Registration,
+                'asemme10_registration_by_programme' => $asemme10RegistrationByProgramme,
+                'has_attended' => $attendedProgrammeIds->isNotEmpty(),
+                'joined_programme_ids' => $joinedProgrammeIds,
+                'attended_programme_ids' => $attendedProgrammeIds,
+                'attendance_by_programme' => $attendanceByProgramme,
+                'latest_attendance_at' => $latestAttendance?->scanned_at?->toISOString(),
+            ];
+        };
+
+        $baseRows = User::query()
             ->leftJoin('countries', 'users.country_id', '=', 'countries.id')
             ->leftJoin('user_types', 'users.user_type_id', '=', 'user_types.id')
             ->where('users.is_active', true)
@@ -344,84 +536,41 @@ Please be informed of the following:
             ])
             ->orderBy('users.name')
             ->get()
-            ->map(function ($row) use ($joinedByUser, $attendanceEntriesByUser, $tableAssignmentsByUser, $vehicleAssignmentsByUser, $assignmentNotificationByUser) {
-                $joinedProgrammeIds = ($joinedByUser->get($row->id) ?? collect())->values();
-                $attendanceEntries = $attendanceEntriesByUser->get($row->id, collect());
-                $tableAssignments = $tableAssignmentsByUser->get($row->id, collect());
-                $vehicleAssignments = $vehicleAssignmentsByUser->get($row->id, collect());
-                $assignmentNotificationEntries = $assignmentNotificationByUser->get($row->id, collect());
+            ->map($buildReportRow);
 
-                $attendedProgrammeIds = $attendanceEntries
-                    ->pluck('programme_id')
-                    ->unique()
-                    ->map(fn ($id) => (int) $id)
-                    ->values();
+        $missingAsemme10UserIds = $asemme10RegistrationByUser
+            ->keys()
+            ->map(fn ($id) => (int) $id)
+            ->diff($baseRows->pluck('id')->map(fn ($id) => (int) $id))
+            ->values();
 
-                $attendanceByProgramme = $attendanceEntries
-                    ->groupBy('programme_id')
-                    ->map(function ($entries) {
-                        $latest = $entries->last();
+        $missingAsemme10Rows = $missingAsemme10UserIds->isEmpty()
+            ? collect()
+            : User::query()
+                ->leftJoin('countries', 'users.country_id', '=', 'countries.id')
+                ->leftJoin('user_types', 'users.user_type_id', '=', 'user_types.id')
+                ->whereIn('users.id', $missingAsemme10UserIds)
+                ->select([
+                    'users.id',
+                    'users.honorific_title',
+                    'users.given_name',
+                    'users.family_name',
+                    'users.suffix',
+                    'users.name',
+                    'users.display_id',
+                    'users.organization_name',
+                    'users.other_user_type',
+                    'users.attend_welcome_dinner',
+                    'users.avail_transport_from_makati_to_peninsula',
+                    'countries.name as country_name',
+                    'user_types.name as registrant_type',
+                ])
+                ->get()
+                ->map($buildReportRow);
 
-                        return $latest?->scanned_at?->toISOString();
-                    })
-                    ->all();
-
-                $latestAttendance = $attendanceEntries->last();
-                $latestTableAssignment = $tableAssignments->last();
-                $latestVehicleAssignment = $vehicleAssignments->last();
-
-                $tableAssignmentByProgramme = $tableAssignments
-                    ->groupBy('programme_id')
-                    ->map(fn ($entries) => $entries->last()?->table_number)
-                    ->all();
-
-                $vehicleAssignmentByProgramme = $vehicleAssignments
-                    ->groupBy('programme_id')
-                    ->map(function ($entries) {
-                        $latest = $entries->last();
-
-                        return $latest?->transport_vehicle_label ?: $latest?->vehicle_label;
-                    })
-                    ->all();
-
-                $vehiclePlateNumberByProgramme = $vehicleAssignments
-                    ->groupBy('programme_id')
-                    ->map(fn ($entries) => $entries->last()?->transport_vehicle_plate_number)
-                    ->all();
-
-                $notificationSentAtByProgramme = $assignmentNotificationEntries
-                    ->groupBy('programme_id')
-                    ->map(fn ($entries) => $entries->last()?->sent_at?->toISOString())
-                    ->all();
-
-                return [
-                    'id' => $row->id,
-                    'honorific_title' => $row->honorific_title,
-                    'given_name' => $row->given_name,
-                    'family_name' => $row->family_name,
-                    'suffix' => $row->suffix,
-                    'name' => $row->name,
-                    'display_id' => $row->display_id,
-                    'country_name' => $row->country_name,
-                    'registrant_type' => $row->registrant_type,
-                    'organization_name' => $row->organization_name,
-                    'other_user_type' => $row->other_user_type,
-                    'attend_welcome_dinner' => (bool) $row->attend_welcome_dinner,
-                    'avail_transport_from_makati_to_peninsula' => (bool) $row->avail_transport_from_makati_to_peninsula,
-                    'table_assignment' => $latestTableAssignment?->table_number,
-                    'table_assignment_by_programme' => $tableAssignmentByProgramme,
-                    'vehicle_assignment' => $latestVehicleAssignment?->transport_vehicle_label ?: $latestVehicleAssignment?->vehicle_label,
-                    'vehicle_assignment_by_programme' => $vehicleAssignmentByProgramme,
-                    'vehicle_plate_number' => $latestVehicleAssignment?->transport_vehicle_plate_number,
-                    'vehicle_plate_number_by_programme' => $vehiclePlateNumberByProgramme,
-                    'notification_sent_at_by_programme' => $notificationSentAtByProgramme,
-                    'has_attended' => $attendedProgrammeIds->isNotEmpty(),
-                    'joined_programme_ids' => $joinedProgrammeIds,
-                    'attended_programme_ids' => $attendedProgrammeIds,
-                    'attendance_by_programme' => $attendanceByProgramme,
-                    'latest_attendance_at' => $latestAttendance?->scanned_at?->toISOString(),
-                ];
-            })
+        $rows = $baseRows
+            ->merge($missingAsemme10Rows)
+            ->sortBy('name')
             ->values();
 
         return Inertia::render('reports', [
@@ -434,6 +583,18 @@ Please be informed of the following:
             'events' => $events,
             'default_event_id' => $defaultEventId ?: null,
             'now_iso' => now()->toISOString(),
+        ]);
+    }
+
+    private function isAsemme10Programme(Programme $programme): bool
+    {
+        $value = Str::lower(trim(($programme->tag ?? '').' '.$programme->title));
+
+        return Str::contains($value, [
+            'asemme10',
+            'asemme 10',
+            'asia-europe meeting of ministers for education',
+            '10th asia-europe meeting',
         ]);
     }
 }
