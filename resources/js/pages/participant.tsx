@@ -583,9 +583,7 @@ function formatDateTimeSafe(value?: string | null) {
 
 function formatAsemme10RegistrationValue(value: unknown): string {
     if (Array.isArray(value)) {
-        const values = value
-            .map((item) => String(item).trim())
-            .filter(Boolean);
+        const values = value.map((item) => String(item).trim()).filter(Boolean);
 
         return values.length ? values.join(', ') : '-';
     }
@@ -952,6 +950,7 @@ function ParticipantIdPrintCard({
             className={cn(
                 // this wrapper is the "real" printed size
                 'id-print-card relative overflow-hidden',
+                designWrap,
                 printSize,
             )}
             style={{
@@ -1885,7 +1884,9 @@ export default function ParticipantPage(props: PageProps) {
                 return (
                     value.includes('asemme10') ||
                     value.includes('asemme 10') ||
-                    value.includes('asia-europe meeting of ministers for education') ||
+                    value.includes(
+                        'asia-europe meeting of ministers for education',
+                    ) ||
                     value.includes('10th asia-europe meeting')
                 );
             }) ?? null,
@@ -1934,7 +1935,8 @@ export default function ParticipantPage(props: PageProps) {
             {
                 value: '',
                 label: 'Select country',
-                description: 'Choose the country represented by this delegation',
+                description:
+                    'Choose the country represented by this delegation',
             },
             ...countries.map((country) => ({
                 value: String(country.id),
@@ -2172,7 +2174,8 @@ export default function ParticipantPage(props: PageProps) {
                     programme.isActive &&
                     (programme.phase === 'ongoing' ||
                         programme.phase === 'upcoming'),
-            ) ?? normalizedProgrammes[0];
+            ) ??
+            normalizedProgrammes[0];
 
         return preferred ? String(preferred.id) : '';
     }
@@ -2345,10 +2348,11 @@ export default function ParticipantPage(props: PageProps) {
     ) {
         asemme10DelegationForm.setData(
             'attendees',
-            asemme10DelegationForm.data.attendees.map((attendee, attendeeIndex) =>
-                attendeeIndex === index
-                    ? { ...attendee, [field]: value }
-                    : attendee,
+            asemme10DelegationForm.data.attendees.map(
+                (attendee, attendeeIndex) =>
+                    attendeeIndex === index
+                        ? { ...attendee, [field]: value }
+                        : attendee,
             ),
         );
     }
@@ -2356,22 +2360,25 @@ export default function ParticipantPage(props: PageProps) {
     function setAsemme10AttendeeTitle(index: number, value: string) {
         asemme10DelegationForm.setData(
             'attendees',
-            asemme10DelegationForm.data.attendees.map((attendee, attendeeIndex) =>
-                attendeeIndex === index
-                    ? {
-                          ...attendee,
-                          title: value,
-                          title_other:
-                              value === 'Other' ? attendee.title_other : '',
-                      }
-                    : attendee,
+            asemme10DelegationForm.data.attendees.map(
+                (attendee, attendeeIndex) =>
+                    attendeeIndex === index
+                        ? {
+                              ...attendee,
+                              title: value,
+                              title_other:
+                                  value === 'Other' ? attendee.title_other : '',
+                          }
+                        : attendee,
             ),
         );
     }
 
     function addAsemme10Attendee() {
         const used = new Set(
-            asemme10DelegationForm.data.attendees.map((attendee) => attendee.role),
+            asemme10DelegationForm.data.attendees.map(
+                (attendee) => attendee.role,
+            ),
         );
         let index = 1;
         while (used.has(`delegate_${index}`)) index += 1;
@@ -2392,7 +2399,8 @@ export default function ParticipantPage(props: PageProps) {
     }
 
     function toggleAsemme10SocialActivity(activity: string, checked: boolean) {
-        const current = asemme10DelegationForm.data.delegation.social_activities;
+        const current =
+            asemme10DelegationForm.data.delegation.social_activities;
         const next = checked
             ? Array.from(new Set([...current, activity]))
             : current.filter((item) => item !== activity);
@@ -2948,6 +2956,416 @@ export default function ParticipantPage(props: PageProps) {
             });
             return next;
         });
+    }
+
+    function renderParticipantActions(p: ParticipantRow) {
+        return (
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-full"
+                    >
+                        <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => openEditParticipant(p)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openProgrammeManager(p)}>
+                        <CalendarDays className="mr-2 h-4 w-4" />
+                        Joined events
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                        onClick={() => toggleParticipantActive(p)}
+                    >
+                        <BadgeCheck className="mr-2 h-4 w-4" />
+                        {p.is_active ? 'Set Inactive' : 'Set Active'}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                        onClick={() => resetParticipantPassword(p)}
+                    >
+                        <KeyRound className="mr-2 h-4 w-4" />
+                        Reset password
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                        className="text-red-600 focus:text-red-600"
+                        onClick={() =>
+                            requestDelete('participant', p.id, p.full_name)
+                        }
+                    >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+        );
+    }
+
+    function renderMobileDetailItem(
+        label: string,
+        value: React.ReactNode,
+        emptyText = 'None specified',
+    ) {
+        const isEmpty =
+            value === null ||
+            value === undefined ||
+            (typeof value === 'string' && value.trim() === '');
+
+        return (
+            <div className="min-w-0">
+                <div className="mb-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                    {label}
+                </div>
+                <div
+                    className={cn(
+                        'text-sm break-words whitespace-normal',
+                        isEmpty
+                            ? 'text-slate-400'
+                            : 'text-slate-700 dark:text-slate-300',
+                    )}
+                >
+                    {isEmpty ? emptyText : value}
+                </div>
+            </div>
+        );
+    }
+
+    function renderPreferenceBadges(
+        values: string[] | undefined,
+        options: readonly { value: string; label: string }[],
+    ) {
+        if (!values?.length) return null;
+
+        return (
+            <div className="flex flex-wrap gap-1">
+                {values.map((value) => {
+                    const label =
+                        options.find((option) => option.value === value)
+                            ?.label ?? value;
+
+                    return (
+                        <Badge
+                            key={value}
+                            variant="secondary"
+                            className="text-[11px]"
+                        >
+                            {label}
+                        </Badge>
+                    );
+                })}
+            </div>
+        );
+    }
+
+    function renderMobileParticipantCard(p: ParticipantRow) {
+        const isChed = isChedParticipant(p);
+        const isExpanded = expandedRowIds.has(p.id);
+        const asemme10Registration = p.asemme10_registration;
+        const asemme10DelegationDetails =
+            asemme10Registration?.delegation_details ?? {};
+        const asemme10Consents = asemme10Registration?.consents ?? {};
+
+        return (
+            <div
+                key={
+                    asemme10Registration?.attendee_id
+                        ? `mobile-asemme10-${asemme10Registration.attendee_id}`
+                        : `mobile-${p.id}`
+                }
+                className={cn(
+                    'rounded-xl border p-3 shadow-sm',
+                    isChed
+                        ? 'border-blue-200 bg-blue-50/70 dark:border-blue-900 dark:bg-blue-950/30'
+                        : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950',
+                )}
+            >
+                <div className="flex items-start gap-3">
+                    <div
+                        className="pt-1"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <Checkbox
+                            checked={selectedParticipantIds.has(p.id)}
+                            onCheckedChange={(checked) =>
+                                toggleParticipantSelect(p.id, !!checked)
+                            }
+                            aria-label={`Select ${p.full_name}`}
+                        />
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => toggleRowExpand(p.id)}
+                        className="min-w-0 flex-1 text-left focus-visible:ring-2 focus-visible:ring-[#00359c]/30 focus-visible:outline-none"
+                    >
+                        <div className="flex min-w-0 items-center gap-2">
+                            <ChevronDown
+                                className={cn(
+                                    'h-4 w-4 shrink-0 text-slate-400 transition-transform',
+                                    isExpanded && 'rotate-180',
+                                )}
+                            />
+                            <div className="min-w-0 flex-1">
+                                <div
+                                    className={cn(
+                                        'truncate text-sm font-semibold text-slate-900 dark:text-slate-100',
+                                        isChed &&
+                                            'text-blue-900 dark:text-blue-100',
+                                    )}
+                                >
+                                    {p.full_name}
+                                </div>
+                                <div className="truncate text-xs text-slate-500 dark:text-slate-400">
+                                    {p.email}
+                                </div>
+                                {isAsemme10RegistrationView &&
+                                    asemme10Registration?.badge_name && (
+                                        <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                                            Badge:{' '}
+                                            {asemme10Registration.badge_name}
+                                        </div>
+                                    )}
+                            </div>
+                        </div>
+                    </button>
+
+                    <div
+                        className="shrink-0"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        {renderParticipantActions(p)}
+                    </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="min-w-0 rounded-lg bg-slate-50 px-2 py-1.5 dark:bg-slate-900/70">
+                        <div className="text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                            Country
+                        </div>
+                        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                            {p.country ? (
+                                <>
+                                    <FlagThumb country={p.country} size={16} />
+                                    <span className="truncate">
+                                        {p.country.name}
+                                    </span>
+                                </>
+                            ) : (
+                                <span className="text-slate-400">-</span>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="min-w-0 rounded-lg bg-slate-50 px-2 py-1.5 dark:bg-slate-900/70">
+                        <div className="text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                            {isAsemme10RegistrationView ? 'Role' : 'Type'}
+                        </div>
+                        <div className="mt-1 truncate text-slate-700 dark:text-slate-300">
+                            {isAsemme10RegistrationView
+                                ? (asemme10Registration?.role ?? '-')
+                                : (p.user_type?.name ?? '-')}
+                        </div>
+                    </div>
+
+                    <div className="min-w-0 rounded-lg bg-slate-50 px-2 py-1.5 dark:bg-slate-900/70">
+                        <div className="text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                            Participant ID
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => openVirtualIdDialog(p)}
+                            className="mt-1 max-w-full truncate text-left text-xs font-semibold text-[#00359c] underline decoration-dotted underline-offset-2 focus-visible:ring-2 focus-visible:ring-[#00359c]/30 focus-visible:outline-none dark:text-blue-300"
+                        >
+                            {p.display_id ?? '-'}
+                        </button>
+                    </div>
+
+                    <div className="min-w-0 rounded-lg bg-slate-50 px-2 py-1.5 dark:bg-slate-900/70">
+                        <div className="text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                            {isAsemme10RegistrationView
+                                ? 'Registration'
+                                : 'Status'}
+                        </div>
+                        <div className="mt-1">
+                            {isAsemme10RegistrationView ? (
+                                <div className="space-y-1">
+                                    <div className="truncate text-slate-700 dark:text-slate-300">
+                                        {asemme10Registration?.registration_type ??
+                                            '-'}
+                                    </div>
+                                    {asemme10Registration?.status && (
+                                        <Badge
+                                            variant="secondary"
+                                            className="rounded-full text-[11px]"
+                                        >
+                                            {asemme10Registration.status}
+                                        </Badge>
+                                    )}
+                                </div>
+                            ) : (
+                                <StatusBadge active={p.is_active} />
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="min-w-0 rounded-lg bg-slate-50 px-2 py-1.5 dark:bg-slate-900/70">
+                        <div className="text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                            {isAsemme10RegistrationView
+                                ? 'Submitted'
+                                : 'Created'}
+                        </div>
+                        <div className="mt-1 truncate text-slate-700 dark:text-slate-300">
+                            {formatDateSafe(
+                                isAsemme10RegistrationView
+                                    ? asemme10Registration?.submitted_at
+                                    : p.created_at,
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {isExpanded && (
+                    <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                        <div className="grid gap-3">
+                            {renderMobileDetailItem(
+                                'Agency / Organization / Institution',
+                                p.organization_name,
+                            )}
+                            {renderMobileDetailItem(
+                                'Position / Designation',
+                                p.position_title,
+                            )}
+                            {renderMobileDetailItem(
+                                'Dietary preferences',
+                                renderPreferenceBadges(
+                                    p.food_restrictions,
+                                    DIETARY_PREFERENCE_OPTIONS,
+                                ),
+                            )}
+                            {p.dietary_allergies
+                                ? renderMobileDetailItem(
+                                      'Allergies',
+                                      p.dietary_allergies,
+                                  )
+                                : null}
+                            {p.dietary_other
+                                ? renderMobileDetailItem(
+                                      'Other dietary notes',
+                                      p.dietary_other,
+                                  )
+                                : null}
+                            {renderMobileDetailItem(
+                                'Accessibility needs',
+                                renderPreferenceBadges(
+                                    p.accessibility_needs,
+                                    ACCESSIBILITY_NEEDS_OPTIONS,
+                                ),
+                            )}
+                            {p.accessibility_other
+                                ? renderMobileDetailItem(
+                                      'Other accessibility notes',
+                                      p.accessibility_other,
+                                  )
+                                : null}
+                        </div>
+
+                        {isAsemme10RegistrationView && asemme10Registration && (
+                            <div className="mt-3 grid gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                                {renderMobileDetailItem(
+                                    'Focal person',
+                                    <div className="space-y-1">
+                                        <div>
+                                            {asemme10Registration.focal_name ??
+                                                '-'}
+                                        </div>
+                                        {asemme10Registration.focal_email && (
+                                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                {
+                                                    asemme10Registration.focal_email
+                                                }
+                                            </div>
+                                        )}
+                                        {asemme10Registration.focal_phone && (
+                                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                {
+                                                    asemme10Registration.focal_phone
+                                                }
+                                            </div>
+                                        )}
+                                    </div>,
+                                )}
+                                {renderMobileDetailItem(
+                                    'Focal organization',
+                                    <div className="space-y-1">
+                                        <div>
+                                            {asemme10Registration.focal_organization ??
+                                                '-'}
+                                        </div>
+                                        {asemme10Registration.focal_position && (
+                                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                {
+                                                    asemme10Registration.focal_position
+                                                }
+                                            </div>
+                                        )}
+                                    </div>,
+                                )}
+                                {renderMobileDetailItem(
+                                    'Dietary requirements',
+                                    asemme10Registration.dietary_requirements,
+                                )}
+                                {renderMobileDetailItem(
+                                    'Mobility / Special needs',
+                                    asemme10Registration.mobility_or_special_needs,
+                                )}
+                                <div className="grid gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                                    <div className="text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                                        Delegation Details
+                                    </div>
+                                    {ASEMME10_DELEGATION_DETAIL_FIELDS.map(
+                                        (field) => (
+                                            <React.Fragment key={field.key}>
+                                                {renderMobileDetailItem(
+                                                    field.label,
+                                                    formatAsemme10RegistrationValue(
+                                                        asemme10DelegationDetails[
+                                                            field.key
+                                                        ],
+                                                    ),
+                                                    '-',
+                                                )}
+                                            </React.Fragment>
+                                        ),
+                                    )}
+                                </div>
+                                <div className="grid gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                                    <div className="text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                                        Consents
+                                    </div>
+                                    {ASEMME10_CONSENT_FIELDS.map((field) => (
+                                        <React.Fragment key={field.key}>
+                                            {renderMobileDetailItem(
+                                                field.label,
+                                                formatAsemme10RegistrationValue(
+                                                    asemme10Consents[field.key],
+                                                ),
+                                                '-',
+                                            )}
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
     }
 
     function registrationFieldError(fieldId: number) {
@@ -3885,36 +4303,44 @@ export default function ParticipantPage(props: PageProps) {
                                     />
                                 ) : (
                                     <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
-                                        <div className="m-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-                                            <span>Show</span>
-                                            <select
-                                                className="h-8 w-[70px] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus-visible:ring-slate-600"
-                                                value={String(entriesPerPage)}
-                                                onChange={(event) => {
-                                                    const value = Number(
-                                                        event.target.value,
-                                                    );
-                                                    setEntriesPerPage(value);
-                                                    setCurrentPage(1);
-                                                    visitParticipants({
-                                                        per_page: value,
-                                                        page: 1,
-                                                    });
-                                                }}
-                                            >
-                                                {ENTRIES_PER_PAGE_OPTIONS.map(
-                                                    (n) => (
-                                                        <option
-                                                            key={n}
-                                                            value={String(n)}
-                                                        >
-                                                            {n}
-                                                        </option>
-                                                    ),
-                                                )}
-                                            </select>
-                                            <span>entries</span>
-                                            <span className="ml-2">
+                                        <div className="m-2 flex flex-col gap-2 text-xs text-slate-600 sm:flex-row sm:items-center dark:text-slate-400">
+                                            <div className="flex items-center gap-2">
+                                                <span>Show</span>
+                                                <select
+                                                    className="h-8 w-[70px] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus-visible:ring-slate-600"
+                                                    value={String(
+                                                        entriesPerPage,
+                                                    )}
+                                                    onChange={(event) => {
+                                                        const value = Number(
+                                                            event.target.value,
+                                                        );
+                                                        setEntriesPerPage(
+                                                            value,
+                                                        );
+                                                        setCurrentPage(1);
+                                                        visitParticipants({
+                                                            per_page: value,
+                                                            page: 1,
+                                                        });
+                                                    }}
+                                                >
+                                                    {ENTRIES_PER_PAGE_OPTIONS.map(
+                                                        (n) => (
+                                                            <option
+                                                                key={n}
+                                                                value={String(
+                                                                    n,
+                                                                )}
+                                                            >
+                                                                {n}
+                                                            </option>
+                                                        ),
+                                                    )}
+                                                </select>
+                                                <span>entries</span>
+                                            </div>
+                                            <span className="sm:ml-2">
                                                 Showing{' '}
                                                 {participantPagination.from ??
                                                     0}{' '}
@@ -3973,6 +4399,7 @@ export default function ParticipantPage(props: PageProps) {
                                                         );
                                                     }
                                                 }}
+                                                className="w-full sm:w-auto"
                                             >
                                                 {paginatedParticipants.length >
                                                     0 &&
@@ -3987,692 +4414,653 @@ export default function ParticipantPage(props: PageProps) {
                                             </Button>
                                         </div>
 
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow className="bg-slate-50 dark:bg-slate-900/40">
-                                                    <TableHead className="w-[220px]">
-                                                        Country
-                                                    </TableHead>
-                                                    <TableHead className="w-[240px]">
-                                                        Name
-                                                    </TableHead>
-                                                    <TableHead className="w-[240px]">
-                                                        <div className="flex items-center gap-2">
-                                                            <Checkbox
-                                                                checked={
-                                                                    allVisibleSelected
-                                                                }
-                                                                onCheckedChange={(
-                                                                    checked,
-                                                                ) =>
-                                                                    toggleSelectAll(
-                                                                        !!checked,
-                                                                    )
-                                                                }
-                                                                aria-label="Select all participants"
-                                                            />
-                                                            <span>
-                                                                Participant ID
-                                                                (QR)
-                                                            </span>
-                                                        </div>
-                                                    </TableHead>
-                                                    <TableHead>Email</TableHead>
-                                                    <TableHead className="w-[200px]">
-                                                        {isAsemme10RegistrationView
-                                                            ? 'Role'
-                                                            : 'User Type'}
-                                                    </TableHead>
-                                                    <TableHead className="w-[140px]">
-                                                        {isAsemme10RegistrationView
-                                                            ? 'Registration'
-                                                            : 'Status'}
-                                                    </TableHead>
-                                                    <TableHead className="w-[140px]">
-                                                        {isAsemme10RegistrationView
-                                                            ? 'Submitted'
-                                                            : 'Created'}
-                                                    </TableHead>
-                                                    <TableHead className="w-[80px] text-right">
-                                                        Action
-                                                    </TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {paginatedParticipants.map(
-                                                    (p) => {
-                                                        const isChed =
-                                                            isChedParticipant(
-                                                                p,
-                                                            );
-                                                        const isExpanded =
-                                                            expandedRowIds.has(
-                                                                p.id,
-                                                            );
-                                                        const asemme10Registration =
-                                                            p.asemme10_registration;
-                                                        const asemme10DelegationDetails =
-                                                            asemme10Registration?.delegation_details ??
-                                                            {};
-                                                        const asemme10Consents =
-                                                            asemme10Registration?.consents ??
-                                                            {};
+                                        <div className="space-y-3 px-3 pb-3 md:hidden">
+                                            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                                                <label className="flex min-w-0 items-center gap-2">
+                                                    <Checkbox
+                                                        checked={
+                                                            allVisibleSelected
+                                                        }
+                                                        onCheckedChange={(
+                                                            checked,
+                                                        ) =>
+                                                            toggleSelectAll(
+                                                                !!checked,
+                                                            )
+                                                        }
+                                                        aria-label="Select all visible participants"
+                                                    />
+                                                    <span className="truncate">
+                                                        Select visible
+                                                    </span>
+                                                </label>
+                                                <span className="shrink-0">
+                                                    {
+                                                        selectedParticipantsPrintable.length
+                                                    }{' '}
+                                                    selected
+                                                </span>
+                                            </div>
 
-                                                        return (
-                                                            <React.Fragment
-                                                                key={
-                                                                    asemme10Registration?.attendee_id
-                                                                        ? `asemme10-${asemme10Registration.attendee_id}`
-                                                                        : p.id
-                                                                }
-                                                            >
-                                                                <TableRow
-                                                                    className={cn(
-                                                                        'cursor-pointer transition-colors',
-                                                                        isChed
-                                                                            ? 'bg-blue-50/70 hover:bg-blue-50 dark:bg-blue-950/30 dark:hover:bg-blue-950/40'
-                                                                            : 'hover:bg-slate-50 dark:hover:bg-slate-900/40',
-                                                                        isExpanded &&
-                                                                            'border-b-0',
-                                                                    )}
-                                                                    onClick={() =>
-                                                                        toggleRowExpand(
-                                                                            p.id,
+                                            {paginatedParticipants.map((p) =>
+                                                renderMobileParticipantCard(p),
+                                            )}
+                                        </div>
+
+                                        <div className="hidden md:block">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow className="bg-slate-50 dark:bg-slate-900/40">
+                                                        <TableHead className="w-[220px]">
+                                                            Country
+                                                        </TableHead>
+                                                        <TableHead className="w-[240px]">
+                                                            Name
+                                                        </TableHead>
+                                                        <TableHead className="w-[240px]">
+                                                            <div className="flex items-center gap-2">
+                                                                <Checkbox
+                                                                    checked={
+                                                                        allVisibleSelected
+                                                                    }
+                                                                    onCheckedChange={(
+                                                                        checked,
+                                                                    ) =>
+                                                                        toggleSelectAll(
+                                                                            !!checked,
                                                                         )
                                                                     }
+                                                                    aria-label="Select all participants"
+                                                                />
+                                                                <span>
+                                                                    Participant
+                                                                    ID (QR)
+                                                                </span>
+                                                            </div>
+                                                        </TableHead>
+                                                        <TableHead>
+                                                            Email
+                                                        </TableHead>
+                                                        <TableHead className="w-[200px]">
+                                                            {isAsemme10RegistrationView
+                                                                ? 'Role'
+                                                                : 'User Type'}
+                                                        </TableHead>
+                                                        <TableHead className="w-[140px]">
+                                                            {isAsemme10RegistrationView
+                                                                ? 'Registration'
+                                                                : 'Status'}
+                                                        </TableHead>
+                                                        <TableHead className="w-[140px]">
+                                                            {isAsemme10RegistrationView
+                                                                ? 'Submitted'
+                                                                : 'Created'}
+                                                        </TableHead>
+                                                        <TableHead className="w-[80px] text-right">
+                                                            Action
+                                                        </TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {paginatedParticipants.map(
+                                                        (p) => {
+                                                            const isChed =
+                                                                isChedParticipant(
+                                                                    p,
+                                                                );
+                                                            const isExpanded =
+                                                                expandedRowIds.has(
+                                                                    p.id,
+                                                                );
+                                                            const asemme10Registration =
+                                                                p.asemme10_registration;
+                                                            const asemme10DelegationDetails =
+                                                                asemme10Registration?.delegation_details ??
+                                                                {};
+                                                            const asemme10Consents =
+                                                                asemme10Registration?.consents ??
+                                                                {};
+
+                                                            return (
+                                                                <React.Fragment
+                                                                    key={
+                                                                        asemme10Registration?.attendee_id
+                                                                            ? `asemme10-${asemme10Registration.attendee_id}`
+                                                                            : p.id
+                                                                    }
                                                                 >
-                                                                    <TableCell className="text-slate-700 dark:text-slate-300">
-                                                                        {p.country ? (
-                                                                            <div className="flex items-center gap-2">
-                                                                                <FlagThumb
-                                                                                    country={
-                                                                                        p.country
+                                                                    <TableRow
+                                                                        className={cn(
+                                                                            'cursor-pointer transition-colors',
+                                                                            isChed
+                                                                                ? 'bg-blue-50/70 hover:bg-blue-50 dark:bg-blue-950/30 dark:hover:bg-blue-950/40'
+                                                                                : 'hover:bg-slate-50 dark:hover:bg-slate-900/40',
+                                                                            isExpanded &&
+                                                                                'border-b-0',
+                                                                        )}
+                                                                        onClick={() =>
+                                                                            toggleRowExpand(
+                                                                                p.id,
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <TableCell className="text-slate-700 dark:text-slate-300">
+                                                                            {p.country ? (
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <FlagThumb
+                                                                                        country={
+                                                                                            p.country
+                                                                                        }
+                                                                                        size={
+                                                                                            18
+                                                                                        }
+                                                                                    />
+                                                                                    <span className="truncate">
+                                                                                        {
+                                                                                            p
+                                                                                                .country
+                                                                                                .name
+                                                                                        }
+                                                                                    </span>
+                                                                                </div>
+                                                                            ) : (
+                                                                                '—'
+                                                                            )}
+                                                                        </TableCell>
+
+                                                                        <TableCell
+                                                                            className={cn(
+                                                                                'font-medium text-slate-900 dark:text-slate-100',
+                                                                                isChed &&
+                                                                                    'text-blue-900 dark:text-blue-100',
+                                                                            )}
+                                                                        >
+                                                                            <div className="flex items-center gap-1.5">
+                                                                                <ChevronDown
+                                                                                    className={cn(
+                                                                                        'h-3.5 w-3.5 text-slate-400 transition-transform',
+                                                                                        isExpanded &&
+                                                                                            'rotate-180',
+                                                                                    )}
+                                                                                />
+                                                                                {
+                                                                                    p.full_name
+                                                                                }
+                                                                            </div>
+                                                                            {isAsemme10RegistrationView &&
+                                                                                asemme10Registration?.badge_name && (
+                                                                                    <div className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                                                                                        Badge:{' '}
+                                                                                        {
+                                                                                            asemme10Registration.badge_name
+                                                                                        }
+                                                                                    </div>
+                                                                                )}
+                                                                        </TableCell>
+
+                                                                        <TableCell>
+                                                                            <div
+                                                                                className="flex items-center gap-3"
+                                                                                onClick={(
+                                                                                    e,
+                                                                                ) =>
+                                                                                    e.stopPropagation()
+                                                                                }
+                                                                            >
+                                                                                <Checkbox
+                                                                                    checked={selectedParticipantIds.has(
+                                                                                        p.id,
+                                                                                    )}
+                                                                                    onCheckedChange={(
+                                                                                        checked,
+                                                                                    ) => {
+                                                                                        toggleParticipantSelect(
+                                                                                            p.id,
+                                                                                            !!checked,
+                                                                                        );
+                                                                                    }}
+                                                                                    aria-label={`Select ${p.full_name}`}
+                                                                                />
+
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() =>
+                                                                                        openVirtualIdDialog(
+                                                                                            p,
+                                                                                        )
                                                                                     }
-                                                                                    size={
-                                                                                        18
+                                                                                    className="rounded-md text-left transition hover:bg-slate-100/80 focus-visible:ring-2 focus-visible:ring-[#00359c]/30 focus-visible:outline-none dark:hover:bg-slate-800/70"
+                                                                                >
+                                                                                    <div className="text-xs text-slate-500">
+                                                                                        Participant
+                                                                                        ID
+                                                                                    </div>
+
+                                                                                    <div className="text-xs font-semibold text-[#00359c] underline decoration-dotted underline-offset-2 dark:text-blue-300">
+                                                                                        {p.display_id ??
+                                                                                            '—'}
+                                                                                    </div>
+                                                                                </button>
+                                                                            </div>
+                                                                        </TableCell>
+
+                                                                        <TableCell className="text-slate-700 dark:text-slate-300">
+                                                                            {
+                                                                                p.email
+                                                                            }
+                                                                        </TableCell>
+                                                                        <TableCell className="text-slate-700 dark:text-slate-300">
+                                                                            {isAsemme10RegistrationView
+                                                                                ? (asemme10Registration?.role ??
+                                                                                  '—')
+                                                                                : (p
+                                                                                      .user_type
+                                                                                      ?.name ??
+                                                                                  '—')}
+                                                                        </TableCell>
+
+                                                                        <TableCell className="text-slate-700 dark:text-slate-300">
+                                                                            {isAsemme10RegistrationView ? (
+                                                                                <div className="space-y-1">
+                                                                                    <div>
+                                                                                        {asemme10Registration?.registration_type ??
+                                                                                            '—'}
+                                                                                    </div>
+                                                                                    {asemme10Registration?.status && (
+                                                                                        <Badge
+                                                                                            variant="secondary"
+                                                                                            className="rounded-full text-[11px]"
+                                                                                        >
+                                                                                            {
+                                                                                                asemme10Registration.status
+                                                                                            }
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                </div>
+                                                                            ) : (
+                                                                                <StatusBadge
+                                                                                    active={
+                                                                                        p.is_active
                                                                                     }
                                                                                 />
-                                                                                <span className="truncate">
-                                                                                    {
-                                                                                        p
-                                                                                            .country
-                                                                                            .name
-                                                                                    }
-                                                                                </span>
-                                                                            </div>
-                                                                        ) : (
-                                                                            '—'
-                                                                        )}
-                                                                    </TableCell>
-
-                                                                    <TableCell
-                                                                        className={cn(
-                                                                            'font-medium text-slate-900 dark:text-slate-100',
-                                                                            isChed &&
-                                                                                'text-blue-900 dark:text-blue-100',
-                                                                        )}
-                                                                    >
-                                                                        <div className="flex items-center gap-1.5">
-                                                                            <ChevronDown
-                                                                                className={cn(
-                                                                                    'h-3.5 w-3.5 text-slate-400 transition-transform',
-                                                                                    isExpanded &&
-                                                                                        'rotate-180',
-                                                                                )}
-                                                                            />
-                                                                            {
-                                                                                p.full_name
-                                                                            }
-                                                                        </div>
-                                                                        {isAsemme10RegistrationView &&
-                                                                            asemme10Registration?.badge_name && (
-                                                                                <div className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
-                                                                                    Badge:{' '}
-                                                                                    {
-                                                                                        asemme10Registration.badge_name
-                                                                                    }
-                                                                                </div>
                                                                             )}
-                                                                    </TableCell>
+                                                                        </TableCell>
 
-                                                                    <TableCell>
-                                                                        <div
-                                                                            className="flex items-center gap-3"
+                                                                        <TableCell className="text-slate-700 dark:text-slate-300">
+                                                                            {formatDateSafe(
+                                                                                isAsemme10RegistrationView
+                                                                                    ? asemme10Registration?.submitted_at
+                                                                                    : p.created_at,
+                                                                            )}
+                                                                        </TableCell>
+
+                                                                        <TableCell
+                                                                            className="text-right"
                                                                             onClick={(
                                                                                 e,
                                                                             ) =>
                                                                                 e.stopPropagation()
                                                                             }
                                                                         >
-                                                                            <Checkbox
-                                                                                checked={selectedParticipantIds.has(
-                                                                                    p.id,
-                                                                                )}
-                                                                                onCheckedChange={(
-                                                                                    checked,
-                                                                                ) => {
-                                                                                    toggleParticipantSelect(
-                                                                                        p.id,
-                                                                                        !!checked,
-                                                                                    );
-                                                                                }}
-                                                                                aria-label={`Select ${p.full_name}`}
-                                                                            />
+                                                                            {renderParticipantActions(
+                                                                                p,
+                                                                            )}
+                                                                        </TableCell>
+                                                                    </TableRow>
 
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() =>
-                                                                                    openVirtualIdDialog(
-                                                                                        p,
-                                                                                    )
-                                                                                }
-                                                                                className="rounded-md text-left transition hover:bg-slate-100/80 focus-visible:ring-2 focus-visible:ring-[#00359c]/30 focus-visible:outline-none dark:hover:bg-slate-800/70"
-                                                                            >
-                                                                                <div className="text-xs text-slate-500">
-                                                                                    Participant
-                                                                                    ID
-                                                                                </div>
-
-                                                                                <div className="text-xs font-semibold text-[#00359c] underline decoration-dotted underline-offset-2 dark:text-blue-300">
-                                                                                    {p.display_id ??
-                                                                                        '—'}
-                                                                                </div>
-                                                                            </button>
-                                                                        </div>
-                                                                    </TableCell>
-
-                                                                    <TableCell className="text-slate-700 dark:text-slate-300">
-                                                                        {
-                                                                            p.email
-                                                                        }
-                                                                    </TableCell>
-                                                                    <TableCell className="text-slate-700 dark:text-slate-300">
-                                                                        {isAsemme10RegistrationView
-                                                                            ? (asemme10Registration?.role ??
-                                                                              '—')
-                                                                            : (p
-                                                                                  .user_type
-                                                                                  ?.name ??
-                                                                              '—')}
-                                                                    </TableCell>
-
-                                                                    <TableCell className="text-slate-700 dark:text-slate-300">
-                                                                        {isAsemme10RegistrationView ? (
-                                                                            <div className="space-y-1">
-                                                                                <div>
-                                                                                    {asemme10Registration?.registration_type ??
-                                                                                        '—'}
-                                                                                </div>
-                                                                                {asemme10Registration?.status && (
-                                                                                    <Badge
-                                                                                        variant="secondary"
-                                                                                        className="rounded-full text-[11px]"
-                                                                                    >
-                                                                                        {
-                                                                                            asemme10Registration.status
-                                                                                        }
-                                                                                    </Badge>
-                                                                                )}
-                                                                            </div>
-                                                                        ) : (
-                                                                            <StatusBadge
-                                                                                active={
-                                                                                    p.is_active
-                                                                                }
-                                                                            />
-                                                                        )}
-                                                                    </TableCell>
-
-                                                                    <TableCell className="text-slate-700 dark:text-slate-300">
-                                                                        {formatDateSafe(
-                                                                            isAsemme10RegistrationView
-                                                                                ? asemme10Registration?.submitted_at
-                                                                                : p.created_at,
-                                                                        )}
-                                                                    </TableCell>
-
-                                                                    <TableCell
-                                                                        className="text-right"
-                                                                        onClick={(
-                                                                            e,
-                                                                        ) =>
-                                                                            e.stopPropagation()
-                                                                        }
-                                                                    >
-                                                                        <DropdownMenu>
-                                                                            <DropdownMenuTrigger
-                                                                                asChild
-                                                                            >
-                                                                                <Button
-                                                                                    variant="ghost"
-                                                                                    size="icon"
-                                                                                    className="rounded-full"
-                                                                                >
-                                                                                    <MoreHorizontal className="h-4 w-4" />
-                                                                                </Button>
-                                                                            </DropdownMenuTrigger>
-                                                                            <DropdownMenuContent
-                                                                                align="end"
-                                                                                className="w-44"
-                                                                            >
-                                                                                <DropdownMenuLabel>
-                                                                                    Actions
-                                                                                </DropdownMenuLabel>
-                                                                                <DropdownMenuItem
-                                                                                    onClick={() =>
-                                                                                        openEditParticipant(
-                                                                                            p,
-                                                                                        )
-                                                                                    }
-                                                                                >
-                                                                                    <Pencil className="mr-2 h-4 w-4" />
-                                                                                    Edit
-                                                                                </DropdownMenuItem>
-                                                                                <DropdownMenuItem
-                                                                                    onClick={() =>
-                                                                                        openProgrammeManager(
-                                                                                            p,
-                                                                                        )
-                                                                                    }
-                                                                                >
-                                                                                    <CalendarDays className="mr-2 h-4 w-4" />
-                                                                                    Joined
-                                                                                    events
-                                                                                </DropdownMenuItem>
-                                                                                <DropdownMenuItem
-                                                                                    onClick={() =>
-                                                                                        toggleParticipantActive(
-                                                                                            p,
-                                                                                        )
-                                                                                    }
-                                                                                >
-                                                                                    <BadgeCheck className="mr-2 h-4 w-4" />
-                                                                                    {p.is_active
-                                                                                        ? 'Set Inactive'
-                                                                                        : 'Set Active'}
-                                                                                </DropdownMenuItem>
-                                                                                <DropdownMenuItem
-                                                                                    onClick={() =>
-                                                                                        resetParticipantPassword(
-                                                                                            p,
-                                                                                        )
-                                                                                    }
-                                                                                >
-                                                                                    <KeyRound className="mr-2 h-4 w-4" />
-                                                                                    Reset
-                                                                                    password
-                                                                                </DropdownMenuItem>
-                                                                                <DropdownMenuSeparator />
-                                                                                <DropdownMenuItem
-                                                                                    className="text-red-600 focus:text-red-600"
-                                                                                    onClick={() =>
-                                                                                        requestDelete(
-                                                                                            'participant',
-                                                                                            p.id,
-                                                                                            p.full_name,
-                                                                                        )
-                                                                                    }
-                                                                                >
-                                                                                    <Trash2 className="mr-2 h-4 w-4" />
-                                                                                    Delete
-                                                                                </DropdownMenuItem>
-                                                                            </DropdownMenuContent>
-                                                                        </DropdownMenu>
-                                                                    </TableCell>
-                                                                </TableRow>
-
-                                                                {/* Expanded detail row */}
-                                                                {isExpanded && (
-                                                                    <TableRow
-                                                                        className={cn(
-                                                                            'border-b',
-                                                                            isChed
-                                                                                ? 'bg-blue-50/40 dark:bg-blue-950/20'
-                                                                                : 'bg-slate-50/50 dark:bg-slate-900/20',
-                                                                        )}
-                                                                    >
-                                                                        <TableCell
-                                                                            colSpan={
-                                                                                8
-                                                                            }
-                                                                            className="px-6 py-3"
+                                                                    {/* Expanded detail row */}
+                                                                    {isExpanded && (
+                                                                        <TableRow
+                                                                            className={cn(
+                                                                                'border-b',
+                                                                                isChed
+                                                                                    ? 'bg-blue-50/40 dark:bg-blue-950/20'
+                                                                                    : 'bg-slate-50/50 dark:bg-slate-900/20',
+                                                                            )}
                                                                         >
-                                                                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                                                                                <div>
-                                                                                    <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                        Agency
-                                                                                        /
-                                                                                        Organization
-                                                                                        /
-                                                                                        Institution
-                                                                                    </div>
-                                                                                    {p.organization_name ? (
-                                                                                        <div className="text-sm text-slate-700 dark:text-slate-300">
-                                                                                            {
-                                                                                                p.organization_name
-                                                                                            }
+                                                                            <TableCell
+                                                                                colSpan={
+                                                                                    8
+                                                                                }
+                                                                                className="px-6 py-3"
+                                                                            >
+                                                                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                                                    <div>
+                                                                                        <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                            Agency
+                                                                                            /
+                                                                                            Organization
+                                                                                            /
+                                                                                            Institution
                                                                                         </div>
-                                                                                    ) : (
-                                                                                        <div className="text-xs text-slate-400">
-                                                                                            None
-                                                                                            specified
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-
-                                                                                <div>
-                                                                                    <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                        Position
-                                                                                        /
-                                                                                        Designation
-                                                                                    </div>
-                                                                                    {p.position_title ? (
-                                                                                        <div className="text-sm text-slate-700 dark:text-slate-300">
-                                                                                            {
-                                                                                                p.position_title
-                                                                                            }
-                                                                                        </div>
-                                                                                    ) : (
-                                                                                        <div className="text-xs text-slate-400">
-                                                                                            None
-                                                                                            specified
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-
-                                                                                <div>
-                                                                                    <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                        Dietary
-                                                                                        Preferences
-                                                                                    </div>
-                                                                                    {(
-                                                                                        p.food_restrictions ??
-                                                                                        []
-                                                                                    )
-                                                                                        .length >
-                                                                                    0 ? (
-                                                                                        <div className="space-y-1">
-                                                                                            <div className="flex flex-wrap gap-1">
-                                                                                                {(
-                                                                                                    p.food_restrictions ??
-                                                                                                    []
-                                                                                                ).map(
-                                                                                                    (
-                                                                                                        r,
-                                                                                                    ) => {
-                                                                                                        const label =
-                                                                                                            DIETARY_PREFERENCE_OPTIONS.find(
-                                                                                                                (
-                                                                                                                    o,
-                                                                                                                ) =>
-                                                                                                                    o.value ===
-                                                                                                                    r,
-                                                                                                            )
-                                                                                                                ?.label ??
-                                                                                                            r;
-                                                                                                        return (
-                                                                                                            <Badge
-                                                                                                                key={
-                                                                                                                    r
-                                                                                                                }
-                                                                                                                variant="secondary"
-                                                                                                                className="text-xs"
-                                                                                                            >
-                                                                                                                {
-                                                                                                                    label
-                                                                                                                }
-                                                                                                            </Badge>
-                                                                                                        );
-                                                                                                    },
-                                                                                                )}
+                                                                                        {p.organization_name ? (
+                                                                                            <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                {
+                                                                                                    p.organization_name
+                                                                                                }
                                                                                             </div>
-                                                                                            {p.dietary_allergies && (
-                                                                                                <div className="text-xs text-slate-600 dark:text-slate-400">
-                                                                                                    <span className="font-medium">
-                                                                                                        Allergies:
-                                                                                                    </span>{' '}
-                                                                                                    {
-                                                                                                        p.dietary_allergies
-                                                                                                    }
-                                                                                                </div>
-                                                                                            )}
-                                                                                            {p.dietary_other && (
-                                                                                                <div className="text-xs text-slate-600 dark:text-slate-400">
-                                                                                                    <span className="font-medium">
-                                                                                                        Other:
-                                                                                                    </span>{' '}
-                                                                                                    {
-                                                                                                        p.dietary_other
-                                                                                                    }
-                                                                                                </div>
-                                                                                            )}
-                                                                                        </div>
-                                                                                    ) : (
-                                                                                        <div className="text-xs text-slate-400">
-                                                                                            None
-                                                                                            specified
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-
-                                                                                <div>
-                                                                                    <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                        Accessibility
-                                                                                        Needs
-                                                                                    </div>
-                                                                                    {(
-                                                                                        p.accessibility_needs ??
-                                                                                        []
-                                                                                    )
-                                                                                        .length >
-                                                                                    0 ? (
-                                                                                        <div className="space-y-1">
-                                                                                            <div className="flex flex-wrap gap-1">
-                                                                                                {(
-                                                                                                    p.accessibility_needs ??
-                                                                                                    []
-                                                                                                ).map(
-                                                                                                    (
-                                                                                                        n,
-                                                                                                    ) => {
-                                                                                                        const label =
-                                                                                                            ACCESSIBILITY_NEEDS_OPTIONS.find(
-                                                                                                                (
-                                                                                                                    o,
-                                                                                                                ) =>
-                                                                                                                    o.value ===
-                                                                                                                    n,
-                                                                                                            )
-                                                                                                                ?.label ??
-                                                                                                            n;
-                                                                                                        return (
-                                                                                                            <Badge
-                                                                                                                key={
-                                                                                                                    n
-                                                                                                                }
-                                                                                                                variant="secondary"
-                                                                                                                className="text-xs"
-                                                                                                            >
-                                                                                                                {
-                                                                                                                    label
-                                                                                                                }
-                                                                                                            </Badge>
-                                                                                                        );
-                                                                                                    },
-                                                                                                )}
+                                                                                        ) : (
+                                                                                            <div className="text-xs text-slate-400">
+                                                                                                None
+                                                                                                specified
                                                                                             </div>
-                                                                                            {p.accessibility_other && (
-                                                                                                <div className="text-xs text-slate-600 dark:text-slate-400">
-                                                                                                    <span className="font-medium">
-                                                                                                        Other:
-                                                                                                    </span>{' '}
-                                                                                                    {
-                                                                                                        p.accessibility_other
-                                                                                                    }
-                                                                                                </div>
-                                                                                            )}
+                                                                                        )}
+                                                                                    </div>
+
+                                                                                    <div>
+                                                                                        <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                            Position
+                                                                                            /
+                                                                                            Designation
                                                                                         </div>
-                                                                                    ) : (
-                                                                                        <div className="text-xs text-slate-400">
-                                                                                            None
-                                                                                            specified
+                                                                                        {p.position_title ? (
+                                                                                            <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                {
+                                                                                                    p.position_title
+                                                                                                }
+                                                                                            </div>
+                                                                                        ) : (
+                                                                                            <div className="text-xs text-slate-400">
+                                                                                                None
+                                                                                                specified
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+
+                                                                                    <div>
+                                                                                        <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                            Dietary
+                                                                                            Preferences
                                                                                         </div>
-                                                                                    )}
-                                                                                </div>
-                                                                            </div>
-                                                                            {isAsemme10RegistrationView &&
-                                                                                asemme10Registration && (
-                                                                                    <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
-                                                                                        <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                            ASEMME10
-                                                                                            Registration
-                                                                                        </div>
-                                                                                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                                                                                            <div>
-                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                                    Focal
-                                                                                                    Person
-                                                                                                </div>
-                                                                                                <div className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
-                                                                                                    <div>
-                                                                                                        {asemme10Registration.focal_name ??
-                                                                                                            'â€”'}
-                                                                                                    </div>
-                                                                                                    {asemme10Registration.focal_email && (
-                                                                                                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                                                                                                            {
-                                                                                                                asemme10Registration.focal_email
-                                                                                                            }
-                                                                                                        </div>
-                                                                                                    )}
-                                                                                                    {asemme10Registration.focal_phone && (
-                                                                                                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                                                                                                            {
-                                                                                                                asemme10Registration.focal_phone
-                                                                                                            }
-                                                                                                        </div>
+                                                                                        {(
+                                                                                            p.food_restrictions ??
+                                                                                            []
+                                                                                        )
+                                                                                            .length >
+                                                                                        0 ? (
+                                                                                            <div className="space-y-1">
+                                                                                                <div className="flex flex-wrap gap-1">
+                                                                                                    {(
+                                                                                                        p.food_restrictions ??
+                                                                                                        []
+                                                                                                    ).map(
+                                                                                                        (
+                                                                                                            r,
+                                                                                                        ) => {
+                                                                                                            const label =
+                                                                                                                DIETARY_PREFERENCE_OPTIONS.find(
+                                                                                                                    (
+                                                                                                                        o,
+                                                                                                                    ) =>
+                                                                                                                        o.value ===
+                                                                                                                        r,
+                                                                                                                )
+                                                                                                                    ?.label ??
+                                                                                                                r;
+                                                                                                            return (
+                                                                                                                <Badge
+                                                                                                                    key={
+                                                                                                                        r
+                                                                                                                    }
+                                                                                                                    variant="secondary"
+                                                                                                                    className="text-xs"
+                                                                                                                >
+                                                                                                                    {
+                                                                                                                        label
+                                                                                                                    }
+                                                                                                                </Badge>
+                                                                                                            );
+                                                                                                        },
                                                                                                     )}
                                                                                                 </div>
-                                                                                            </div>
-
-                                                                                            <div>
-                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                                    Focal
-                                                                                                    Organization
-                                                                                                </div>
-                                                                                                <div className="text-sm text-slate-700 dark:text-slate-300">
-                                                                                                    {asemme10Registration.focal_organization ??
-                                                                                                        'â€”'}
-                                                                                                </div>
-                                                                                                {asemme10Registration.focal_position && (
-                                                                                                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                                                                                {p.dietary_allergies && (
+                                                                                                    <div className="text-xs text-slate-600 dark:text-slate-400">
+                                                                                                        <span className="font-medium">
+                                                                                                            Allergies:
+                                                                                                        </span>{' '}
                                                                                                         {
-                                                                                                            asemme10Registration.focal_position
+                                                                                                            p.dietary_allergies
+                                                                                                        }
+                                                                                                    </div>
+                                                                                                )}
+                                                                                                {p.dietary_other && (
+                                                                                                    <div className="text-xs text-slate-600 dark:text-slate-400">
+                                                                                                        <span className="font-medium">
+                                                                                                            Other:
+                                                                                                        </span>{' '}
+                                                                                                        {
+                                                                                                            p.dietary_other
                                                                                                         }
                                                                                                     </div>
                                                                                                 )}
                                                                                             </div>
-
-                                                                                            <div>
-                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                                    Dietary
-                                                                                                    Requirements
-                                                                                                </div>
-                                                                                                <div className="text-sm text-slate-700 dark:text-slate-300">
-                                                                                                    {asemme10Registration.dietary_requirements ??
-                                                                                                        'None specified'}
-                                                                                                </div>
+                                                                                        ) : (
+                                                                                            <div className="text-xs text-slate-400">
+                                                                                                None
+                                                                                                specified
                                                                                             </div>
-
-                                                                                            <div>
-                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                                    Mobility
-                                                                                                    /
-                                                                                                    Special
-                                                                                                    Needs
-                                                                                                </div>
-                                                                                                <div className="text-sm text-slate-700 dark:text-slate-300">
-                                                                                                    {asemme10Registration.mobility_or_special_needs ??
-                                                                                                        'None specified'}
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        </div>
-                                                                                        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
-                                                                                            <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                                Delegation
-                                                                                                Details
-                                                                                            </div>
-                                                                                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                                                                                                {ASEMME10_DELEGATION_DETAIL_FIELDS.map(
-                                                                                                    (
-                                                                                                        field,
-                                                                                                    ) => (
-                                                                                                        <div
-                                                                                                            key={
-                                                                                                                field.key
-                                                                                                            }
-                                                                                                        >
-                                                                                                            <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                                                {
-                                                                                                                    field.label
-                                                                                                                }
-                                                                                                            </div>
-                                                                                                            <div className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">
-                                                                                                                {formatAsemme10RegistrationValue(
-                                                                                                                    asemme10DelegationDetails[
-                                                                                                                        field
-                                                                                                                            .key
-                                                                                                                    ],
-                                                                                                                )}
-                                                                                                            </div>
-                                                                                                        </div>
-                                                                                                    ),
-                                                                                                )}
-                                                                                            </div>
-                                                                                        </div>
-                                                                                        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
-                                                                                            <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                                Consents
-                                                                                            </div>
-                                                                                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                                                                                                {ASEMME10_CONSENT_FIELDS.map(
-                                                                                                    (
-                                                                                                        field,
-                                                                                                    ) => (
-                                                                                                        <div
-                                                                                                            key={
-                                                                                                                field.key
-                                                                                                            }
-                                                                                                        >
-                                                                                                            <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                                                                                                                {
-                                                                                                                    field.label
-                                                                                                                }
-                                                                                                            </div>
-                                                                                                            <div className="text-sm text-slate-700 dark:text-slate-300">
-                                                                                                                {formatAsemme10RegistrationValue(
-                                                                                                                    asemme10Consents[
-                                                                                                                        field
-                                                                                                                            .key
-                                                                                                                    ],
-                                                                                                                )}
-                                                                                                            </div>
-                                                                                                        </div>
-                                                                                                    ),
-                                                                                                )}
-                                                                                            </div>
-                                                                                        </div>
+                                                                                        )}
                                                                                     </div>
-                                                                                )}
-                                                                        </TableCell>
-                                                                    </TableRow>
-                                                                )}
-                                                            </React.Fragment>
-                                                        );
-                                                    },
-                                                )}
-                                            </TableBody>
-                                        </Table>
+
+                                                                                    <div>
+                                                                                        <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                            Accessibility
+                                                                                            Needs
+                                                                                        </div>
+                                                                                        {(
+                                                                                            p.accessibility_needs ??
+                                                                                            []
+                                                                                        )
+                                                                                            .length >
+                                                                                        0 ? (
+                                                                                            <div className="space-y-1">
+                                                                                                <div className="flex flex-wrap gap-1">
+                                                                                                    {(
+                                                                                                        p.accessibility_needs ??
+                                                                                                        []
+                                                                                                    ).map(
+                                                                                                        (
+                                                                                                            n,
+                                                                                                        ) => {
+                                                                                                            const label =
+                                                                                                                ACCESSIBILITY_NEEDS_OPTIONS.find(
+                                                                                                                    (
+                                                                                                                        o,
+                                                                                                                    ) =>
+                                                                                                                        o.value ===
+                                                                                                                        n,
+                                                                                                                )
+                                                                                                                    ?.label ??
+                                                                                                                n;
+                                                                                                            return (
+                                                                                                                <Badge
+                                                                                                                    key={
+                                                                                                                        n
+                                                                                                                    }
+                                                                                                                    variant="secondary"
+                                                                                                                    className="text-xs"
+                                                                                                                >
+                                                                                                                    {
+                                                                                                                        label
+                                                                                                                    }
+                                                                                                                </Badge>
+                                                                                                            );
+                                                                                                        },
+                                                                                                    )}
+                                                                                                </div>
+                                                                                                {p.accessibility_other && (
+                                                                                                    <div className="text-xs text-slate-600 dark:text-slate-400">
+                                                                                                        <span className="font-medium">
+                                                                                                            Other:
+                                                                                                        </span>{' '}
+                                                                                                        {
+                                                                                                            p.accessibility_other
+                                                                                                        }
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        ) : (
+                                                                                            <div className="text-xs text-slate-400">
+                                                                                                None
+                                                                                                specified
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </div>
+                                                                                {isAsemme10RegistrationView &&
+                                                                                    asemme10Registration && (
+                                                                                        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                                                                                            <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                ASEMME10
+                                                                                                Registration
+                                                                                            </div>
+                                                                                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                                                                <div>
+                                                                                                    <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                        Focal
+                                                                                                        Person
+                                                                                                    </div>
+                                                                                                    <div className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
+                                                                                                        <div>
+                                                                                                            {asemme10Registration.focal_name ??
+                                                                                                                'â€”'}
+                                                                                                        </div>
+                                                                                                        {asemme10Registration.focal_email && (
+                                                                                                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                                                                                {
+                                                                                                                    asemme10Registration.focal_email
+                                                                                                                }
+                                                                                                            </div>
+                                                                                                        )}
+                                                                                                        {asemme10Registration.focal_phone && (
+                                                                                                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                                                                                {
+                                                                                                                    asemme10Registration.focal_phone
+                                                                                                                }
+                                                                                                            </div>
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                </div>
+
+                                                                                                <div>
+                                                                                                    <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                        Focal
+                                                                                                        Organization
+                                                                                                    </div>
+                                                                                                    <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                        {asemme10Registration.focal_organization ??
+                                                                                                            'â€”'}
+                                                                                                    </div>
+                                                                                                    {asemme10Registration.focal_position && (
+                                                                                                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                                                                                            {
+                                                                                                                asemme10Registration.focal_position
+                                                                                                            }
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                </div>
+
+                                                                                                <div>
+                                                                                                    <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                        Dietary
+                                                                                                        Requirements
+                                                                                                    </div>
+                                                                                                    <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                        {asemme10Registration.dietary_requirements ??
+                                                                                                            'None specified'}
+                                                                                                    </div>
+                                                                                                </div>
+
+                                                                                                <div>
+                                                                                                    <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                        Mobility
+                                                                                                        /
+                                                                                                        Special
+                                                                                                        Needs
+                                                                                                    </div>
+                                                                                                    <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                        {asemme10Registration.mobility_or_special_needs ??
+                                                                                                            'None specified'}
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                                                                                                <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                    Delegation
+                                                                                                    Details
+                                                                                                </div>
+                                                                                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                                                                    {ASEMME10_DELEGATION_DETAIL_FIELDS.map(
+                                                                                                        (
+                                                                                                            field,
+                                                                                                        ) => (
+                                                                                                            <div
+                                                                                                                key={
+                                                                                                                    field.key
+                                                                                                                }
+                                                                                                            >
+                                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                                    {
+                                                                                                                        field.label
+                                                                                                                    }
+                                                                                                                </div>
+                                                                                                                <div className="text-sm whitespace-pre-wrap text-slate-700 dark:text-slate-300">
+                                                                                                                    {formatAsemme10RegistrationValue(
+                                                                                                                        asemme10DelegationDetails[
+                                                                                                                            field
+                                                                                                                                .key
+                                                                                                                        ],
+                                                                                                                    )}
+                                                                                                                </div>
+                                                                                                            </div>
+                                                                                                        ),
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                                                                                                <div className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                    Consents
+                                                                                                </div>
+                                                                                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                                                                    {ASEMME10_CONSENT_FIELDS.map(
+                                                                                                        (
+                                                                                                            field,
+                                                                                                        ) => (
+                                                                                                            <div
+                                                                                                                key={
+                                                                                                                    field.key
+                                                                                                                }
+                                                                                                            >
+                                                                                                                <div className="mb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                                                                                                                    {
+                                                                                                                        field.label
+                                                                                                                    }
+                                                                                                                </div>
+                                                                                                                <div className="text-sm text-slate-700 dark:text-slate-300">
+                                                                                                                    {formatAsemme10RegistrationValue(
+                                                                                                                        asemme10Consents[
+                                                                                                                            field
+                                                                                                                                .key
+                                                                                                                        ],
+                                                                                                                    )}
+                                                                                                                </div>
+                                                                                                            </div>
+                                                                                                        ),
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )}
+                                                                            </TableCell>
+                                                                        </TableRow>
+                                                                    )}
+                                                                </React.Fragment>
+                                                            );
+                                                        },
+                                                    )}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
 
                                         {/* Pagination controls */}
                                         <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
@@ -5419,557 +5807,641 @@ export default function ParticipantPage(props: PageProps) {
                         >
                             <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto px-5 py-5 sm:px-8">
                                 <div className="grid gap-5 rounded-xl border border-slate-200 p-5 md:grid-cols-2 dark:border-slate-800">
-                            <div className="md:col-span-2">
-                                <div className="text-sm font-semibold">
-                                    1. Delegation and focal contact
-                                </div>
-                                <div className="text-xs text-slate-500 dark:text-slate-400">
-                                    Select the delegation type and the person to
-                                    contact about this submission.
-                                </div>
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    ASEMME10 Event
-                                </label>
-                                <Input
-                                    value={asemme10Programme?.title ?? ''}
-                                    disabled
-                                />
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Registration type
-                                </label>
-                                <SearchableCommandSelect
-                                    value={
-                                        asemme10DelegationForm.data
-                                            .registration_type
-                                    }
-                                    options={
-                                        ASEMME10_REGISTRATION_TYPE_OPTIONS
-                                    }
-                                    placeholder="Select registration type"
-                                    searchPlaceholder="Search registration type..."
-                                    emptyText="No registration type found."
-                                    onValueChange={(value) =>
-                                        setAsemme10RegistrationType(
-                                            value,
-                                        )
-                                    }
-                                />
-                            </div>
-
-                            {asemme10DelegationForm.data.registration_type ===
-                            'Other' ? (
-                                <div className="grid gap-1.5 md:col-span-2">
-                                    <label className="text-sm font-medium">
-                                        Specify registration type
-                                        <span className="text-[11px] font-semibold text-red-600">
-                                            {' '}
-                                            *
-                                        </span>
-                                    </label>
-                                    <Input
-                                        placeholder="Enter the delegation type"
-                                        value={
-                                            asemme10DelegationForm.data
-                                                .delegation
-                                                .registration_type_other
-                                        }
-                                        onChange={(event) =>
-                                            updateAsemme10Delegation(
-                                                'registration_type_other',
-                                                event.target.value,
-                                            )
-                                        }
-                                    />
-                                    {asemme10DelegationError(
-                                        'delegation.registration_type_other',
-                                    ) ? (
-                                        <div className="text-xs text-red-600">
-                                            {asemme10DelegationError(
-                                                'delegation.registration_type_other',
-                                            )}
+                                    <div className="md:col-span-2">
+                                        <div className="text-sm font-semibold">
+                                            1. Delegation and focal contact
                                         </div>
-                                    ) : null}
-                                </div>
-                            ) : null}
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Country
-                                </label>
-                                <SearchableCommandSelect
-                                    value={
-                                        asemme10DelegationForm.data.country_id
-                                    }
-                                    options={asemme10CountryOptions}
-                                    placeholder="Select country"
-                                    searchPlaceholder="Search country..."
-                                    emptyText="No country found."
-                                    onValueChange={(value) =>
-                                        asemme10DelegationForm.setData(
-                                            'country_id',
-                                            value,
-                                        )
-                                    }
-                                />
-                                {asemme10DelegationError('country_id') ? (
-                                    <div className="text-xs text-red-600">
-                                        {asemme10DelegationError('country_id')}
+                                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                                            Select the delegation type and the
+                                            person to contact about this
+                                            submission.
+                                        </div>
                                     </div>
-                                ) : null}
-                            </div>
 
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Focal name
-                                    <span className="text-[11px] font-semibold text-red-600">
-                                        {' '}
-                                        *
-                                    </span>
-                                </label>
-                                <Input
-                                    placeholder="Full name"
-                                    value={
-                                        asemme10DelegationForm.data.focal.name
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Focal(
-                                            'name',
-                                            event.target.value,
-                                        )
-                                    }
-                                />
-                                {(asemme10DelegationForm.errors as Record<string, string>)[
-                                    'focal.name'
-                                ] ? (
-                                    <div className="text-xs text-red-600">
-                                        {
-                                            (
-                                                asemme10DelegationForm.errors as Record<
-                                                    string,
-                                                    string
-                                                >
-                                            )['focal.name']
-                                        }
-                                    </div>
-                                ) : null}
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Focal email
-                                    <span className="text-[11px] font-semibold text-red-600">
-                                        {' '}
-                                        *
-                                    </span>
-                                </label>
-                                <Input
-                                    type="email"
-                                    placeholder="focal@example.com"
-                                    value={
-                                        asemme10DelegationForm.data.focal.email
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Focal(
-                                            'email',
-                                            event.target.value,
-                                        )
-                                    }
-                                />
-                                {asemme10DelegationError('focal.email') ? (
-                                    <div className="text-xs text-red-600">
-                                        {asemme10DelegationError('focal.email')}
-                                    </div>
-                                ) : null}
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Focal phone
-                                </label>
-                                <Input
-                                    placeholder="Phone number"
-                                    value={
-                                        asemme10DelegationForm.data.focal.phone
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Focal(
-                                            'phone',
-                                            event.target.value,
-                                        )
-                                    }
-                                />
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Focal organization
-                                </label>
-                                <Input
-                                    placeholder="Ministry, agency, or organization"
-                                    value={
-                                        asemme10DelegationForm.data.focal
-                                            .organization
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Focal(
-                                            'organization',
-                                            event.target.value,
-                                        )
-                                    }
-                                />
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Focal position
-                                </label>
-                                <Input
-                                    placeholder="Position / designation"
-                                    value={
-                                        asemme10DelegationForm.data.focal
-                                            .position
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Focal(
-                                            'position',
-                                            event.target.value,
-                                        )
-                                    }
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
-                            <div>
-                                <div className="text-sm font-semibold">
-                                    2. Required consent
-                                </div>
-                                <div className="text-xs text-slate-500 dark:text-slate-400">
-                                    Confirm these items before saving the
-                                    delegation.
-                                </div>
-                            </div>
-                            {[
-                                [
-                                    'data_collection',
-                                    'I confirm that I have read and understood the data collection notice.',
-                                ],
-                                [
-                                    'data_storage',
-                                    'I consent to the submitted data being collected and stored only for organising this Ministerial Meeting.',
-                                ],
-                                [
-                                    'photo_video',
-                                    'I consent to photo, video, and meeting recording use for event documentation.',
-                                ],
-                            ].map(([key, label]) => (
-                                <label
-                                    key={key}
-                                    className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800"
-                                >
-                                    <Checkbox
-                                        checked={
-                                            asemme10DelegationForm.data
-                                                .consents[
-                                                key as keyof typeof asemme10DelegationForm.data.consents
-                                            ]
-                                        }
-                                        onCheckedChange={(checked) =>
-                                            asemme10DelegationForm.setData(
-                                                'consents',
-                                                {
-                                                    ...asemme10DelegationForm
-                                                        .data.consents,
-                                                    [key]: Boolean(checked),
-                                                },
-                                            )
-                                        }
-                                    />
-                                    <span>{label}</span>
-                                </label>
-                            ))}
-                            {asemme10DelegationError(
-                                'consents.data_collection',
-                            ) ||
-                            asemme10DelegationError('consents.data_storage') ||
-                            asemme10DelegationError('consents.photo_video') ? (
-                                <div className="text-xs text-red-600">
-                                    Please confirm all required consent items.
-                                </div>
-                            ) : null}
-                        </div>
-
-                        <div className="grid gap-4 rounded-xl border border-slate-200 p-4 sm:grid-cols-2 dark:border-slate-800">
-                            <div className="sm:col-span-2">
-                                <div className="text-sm font-semibold">
-                                    3. Delegation notes
-                                </div>
-                                <div className="text-xs text-slate-500 dark:text-slate-400">
-                                    Add reception, dinner, meeting, or general
-                                    notes if needed.
-                                </div>
-                            </div>
-                            <div className="grid gap-1.5 sm:col-span-2">
-                                <label className="text-sm font-medium">
-                                    Social activities
-                                </label>
-                                <div className="grid gap-2 sm:grid-cols-3">
-                                    {ASEMME10_SOCIAL_ACTIVITIES.map(
-                                        (activity) => (
-                                            <label
-                                                key={activity}
-                                                className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800"
-                                            >
-                                                <Checkbox
-                                                    checked={asemme10DelegationForm.data.delegation.social_activities.includes(
-                                                        activity,
-                                                    )}
-                                                    onCheckedChange={(
-                                                        checked,
-                                                    ) =>
-                                                        toggleAsemme10SocialActivity(
-                                                            activity,
-                                                            Boolean(checked),
-                                                        )
-                                                    }
-                                                />
-                                                <span>{activity}</span>
-                                            </label>
-                                        ),
-                                    )}
-                                </div>
-                                {asemme10DelegationForm.data.delegation.social_activities.includes(
-                                    'Other',
-                                ) ? (
                                     <div className="grid gap-1.5">
                                         <label className="text-sm font-medium">
-                                            Specify other social activity
+                                            ASEMME10 Event
+                                        </label>
+                                        <Input
+                                            value={
+                                                asemme10Programme?.title ?? ''
+                                            }
+                                            disabled
+                                        />
+                                    </div>
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Registration type
+                                        </label>
+                                        <SearchableCommandSelect
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .registration_type
+                                            }
+                                            options={
+                                                ASEMME10_REGISTRATION_TYPE_OPTIONS
+                                            }
+                                            placeholder="Select registration type"
+                                            searchPlaceholder="Search registration type..."
+                                            emptyText="No registration type found."
+                                            onValueChange={(value) =>
+                                                setAsemme10RegistrationType(
+                                                    value,
+                                                )
+                                            }
+                                        />
+                                    </div>
+
+                                    {asemme10DelegationForm.data
+                                        .registration_type === 'Other' ? (
+                                        <div className="grid gap-1.5 md:col-span-2">
+                                            <label className="text-sm font-medium">
+                                                Specify registration type
+                                                <span className="text-[11px] font-semibold text-red-600">
+                                                    {' '}
+                                                    *
+                                                </span>
+                                            </label>
+                                            <Input
+                                                placeholder="Enter the delegation type"
+                                                value={
+                                                    asemme10DelegationForm.data
+                                                        .delegation
+                                                        .registration_type_other
+                                                }
+                                                onChange={(event) =>
+                                                    updateAsemme10Delegation(
+                                                        'registration_type_other',
+                                                        event.target.value,
+                                                    )
+                                                }
+                                            />
+                                            {asemme10DelegationError(
+                                                'delegation.registration_type_other',
+                                            ) ? (
+                                                <div className="text-xs text-red-600">
+                                                    {asemme10DelegationError(
+                                                        'delegation.registration_type_other',
+                                                    )}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Country
+                                        </label>
+                                        <SearchableCommandSelect
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .country_id
+                                            }
+                                            options={asemme10CountryOptions}
+                                            placeholder="Select country"
+                                            searchPlaceholder="Search country..."
+                                            emptyText="No country found."
+                                            onValueChange={(value) =>
+                                                asemme10DelegationForm.setData(
+                                                    'country_id',
+                                                    value,
+                                                )
+                                            }
+                                        />
+                                        {asemme10DelegationError(
+                                            'country_id',
+                                        ) ? (
+                                            <div className="text-xs text-red-600">
+                                                {asemme10DelegationError(
+                                                    'country_id',
+                                                )}
+                                            </div>
+                                        ) : null}
+                                    </div>
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Focal name
                                             <span className="text-[11px] font-semibold text-red-600">
                                                 {' '}
                                                 *
                                             </span>
                                         </label>
                                         <Input
-                                            placeholder="Enter the activity"
+                                            placeholder="Full name"
                                             value={
                                                 asemme10DelegationForm.data
-                                                    .delegation
-                                                    .social_activity_other
+                                                    .focal.name
                                             }
                                             onChange={(event) =>
-                                                updateAsemme10Delegation(
-                                                    'social_activity_other',
+                                                updateAsemme10Focal(
+                                                    'name',
+                                                    event.target.value,
+                                                )
+                                            }
+                                        />
+                                        {(
+                                            asemme10DelegationForm.errors as Record<
+                                                string,
+                                                string
+                                            >
+                                        )['focal.name'] ? (
+                                            <div className="text-xs text-red-600">
+                                                {
+                                                    (
+                                                        asemme10DelegationForm.errors as Record<
+                                                            string,
+                                                            string
+                                                        >
+                                                    )['focal.name']
+                                                }
+                                            </div>
+                                        ) : null}
+                                    </div>
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Focal email
+                                            <span className="text-[11px] font-semibold text-red-600">
+                                                {' '}
+                                                *
+                                            </span>
+                                        </label>
+                                        <Input
+                                            type="email"
+                                            placeholder="focal@example.com"
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .focal.email
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Focal(
+                                                    'email',
                                                     event.target.value,
                                                 )
                                             }
                                         />
                                         {asemme10DelegationError(
-                                            'delegation.social_activity_other',
+                                            'focal.email',
                                         ) ? (
                                             <div className="text-xs text-red-600">
                                                 {asemme10DelegationError(
-                                                    'delegation.social_activity_other',
+                                                    'focal.email',
                                                 )}
                                             </div>
                                         ) : null}
                                     </div>
-                                ) : null}
-                            </div>
 
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Bilateral meeting interest
-                                </label>
-                                <SearchableCommandSelect
-                                    value={
-                                        asemme10DelegationForm.data.delegation
-                                            .bilateral_meeting_interest
-                                    }
-                                    options={ASEMME10_BILATERAL_MEETING_OPTIONS}
-                                    placeholder="Select interest"
-                                    searchPlaceholder="Search meeting interest..."
-                                    emptyText="No option found."
-                                    onValueChange={(value) =>
-                                        updateAsemme10Delegation(
-                                            'bilateral_meeting_interest',
-                                            value,
-                                        )
-                                    }
-                                />
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Bilateral contact emails
-                                </label>
-                                <Input
-                                    placeholder="email@example.com, another@example.com"
-                                    value={
-                                        asemme10DelegationForm.data.delegation
-                                            .bilateral_contact_emails
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Delegation(
-                                            'bilateral_contact_emails',
-                                            event.target.value,
-                                        )
-                                    }
-                                />
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Social activity details
-                                </label>
-                                <textarea
-                                    value={
-                                        asemme10DelegationForm.data.delegation
-                                            .social_activity_details
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Delegation(
-                                            'social_activity_details',
-                                            event.target.value,
-                                        )
-                                    }
-                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-                                />
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <label className="text-sm font-medium">
-                                    Bilateral meeting comments
-                                </label>
-                                <textarea
-                                    value={
-                                        asemme10DelegationForm.data.delegation
-                                            .bilateral_comments
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Delegation(
-                                            'bilateral_comments',
-                                            event.target.value,
-                                        )
-                                    }
-                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-                                />
-                            </div>
-
-                            <div className="grid gap-1.5 sm:col-span-2">
-                                <label className="text-sm font-medium">
-                                    Additional comments
-                                </label>
-                                <textarea
-                                    value={
-                                        asemme10DelegationForm.data.delegation
-                                            .additional_comments
-                                    }
-                                    onChange={(event) =>
-                                        updateAsemme10Delegation(
-                                            'additional_comments',
-                                            event.target.value,
-                                        )
-                                    }
-                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid gap-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div>
-                                    <div className="text-sm font-semibold">
-                                        4. Participants to create
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Focal phone
+                                        </label>
+                                        <Input
+                                            placeholder="Phone number"
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .focal.phone
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Focal(
+                                                    'phone',
+                                                    event.target.value,
+                                                )
+                                            }
+                                        />
                                     </div>
-                                    <div className="max-w-2xl text-xs text-slate-500 dark:text-slate-400">
-                                        Add one row for every person who needs a
-                                        QR code. Use each attendee's own email
-                                        when available; leave it blank if the
-                                        focal will manage the ID.
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Focal organization
+                                        </label>
+                                        <Input
+                                            placeholder="Ministry, agency, or organization"
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .focal.organization
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Focal(
+                                                    'organization',
+                                                    event.target.value,
+                                                )
+                                            }
+                                        />
+                                    </div>
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Focal position
+                                        </label>
+                                        <Input
+                                            placeholder="Position / designation"
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .focal.position
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Focal(
+                                                    'position',
+                                                    event.target.value,
+                                                )
+                                            }
+                                        />
                                     </div>
                                 </div>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={addAsemme10Attendee}
-                                >
-                                    <Plus className="mr-2 h-4 w-4" />
-                                    Add participant
-                                </Button>
-                            </div>
-                            {asemme10DelegationError('attendees') ? (
-                                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
-                                    {asemme10DelegationError('attendees')}
-                                </div>
-                            ) : null}
 
-                            {asemme10DelegationForm.data.attendees.map(
-                                (attendee, index) => (
-                                    <div
-                                        key={`${attendee.role}-${index}`}
-                                        className="grid gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
-                                    >
-                                        <div className="flex items-center justify-between gap-2">
-                                            <Badge variant="secondary">
-                                                Participant {index + 1}:{' '}
-                                                {asemme10RoleLabel(attendee.role)}
-                                            </Badge>
-                                            {asemme10DelegationForm.data
-                                                .attendees.length > 1 &&
-                                            attendee.role !== 'head' ? (
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() =>
-                                                        removeAsemme10Attendee(
-                                                            index,
-                                                        )
-                                                    }
-                                                >
-                                                    <Trash2 className="mr-2 h-4 w-4" />
-                                                    Remove
-                                                </Button>
-                                            ) : null}
+                                <div className="grid gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                                    <div>
+                                        <div className="text-sm font-semibold">
+                                            2. Required consent
                                         </div>
+                                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                                            Confirm these items before saving
+                                            the delegation.
+                                        </div>
+                                    </div>
+                                    {[
+                                        [
+                                            'data_collection',
+                                            'I confirm that I have read and understood the data collection notice.',
+                                        ],
+                                        [
+                                            'data_storage',
+                                            'I consent to the submitted data being collected and stored only for organising this Ministerial Meeting.',
+                                        ],
+                                        [
+                                            'photo_video',
+                                            'I consent to photo, video, and meeting recording use for event documentation.',
+                                        ],
+                                    ].map(([key, label]) => (
+                                        <label
+                                            key={key}
+                                            className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800"
+                                        >
+                                            <Checkbox
+                                                checked={
+                                                    asemme10DelegationForm.data
+                                                        .consents[
+                                                        key as keyof typeof asemme10DelegationForm.data.consents
+                                                    ]
+                                                }
+                                                onCheckedChange={(checked) =>
+                                                    asemme10DelegationForm.setData(
+                                                        'consents',
+                                                        {
+                                                            ...asemme10DelegationForm
+                                                                .data.consents,
+                                                            [key]: Boolean(
+                                                                checked,
+                                                            ),
+                                                        },
+                                                    )
+                                                }
+                                            />
+                                            <span>{label}</span>
+                                        </label>
+                                    ))}
+                                    {asemme10DelegationError(
+                                        'consents.data_collection',
+                                    ) ||
+                                    asemme10DelegationError(
+                                        'consents.data_storage',
+                                    ) ||
+                                    asemme10DelegationError(
+                                        'consents.photo_video',
+                                    ) ? (
+                                        <div className="text-xs text-red-600">
+                                            Please confirm all required consent
+                                            items.
+                                        </div>
+                                    ) : null}
+                                </div>
 
-                                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="grid gap-4 rounded-xl border border-slate-200 p-4 sm:grid-cols-2 dark:border-slate-800">
+                                    <div className="sm:col-span-2">
+                                        <div className="text-sm font-semibold">
+                                            3. Delegation notes
+                                        </div>
+                                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                                            Add reception, dinner, meeting, or
+                                            general notes if needed.
+                                        </div>
+                                    </div>
+                                    <div className="grid gap-1.5 sm:col-span-2">
+                                        <label className="text-sm font-medium">
+                                            Social activities
+                                        </label>
+                                        <div className="grid gap-2 sm:grid-cols-3">
+                                            {ASEMME10_SOCIAL_ACTIVITIES.map(
+                                                (activity) => (
+                                                    <label
+                                                        key={activity}
+                                                        className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800"
+                                                    >
+                                                        <Checkbox
+                                                            checked={asemme10DelegationForm.data.delegation.social_activities.includes(
+                                                                activity,
+                                                            )}
+                                                            onCheckedChange={(
+                                                                checked,
+                                                            ) =>
+                                                                toggleAsemme10SocialActivity(
+                                                                    activity,
+                                                                    Boolean(
+                                                                        checked,
+                                                                    ),
+                                                                )
+                                                            }
+                                                        />
+                                                        <span>{activity}</span>
+                                                    </label>
+                                                ),
+                                            )}
+                                        </div>
+                                        {asemme10DelegationForm.data.delegation.social_activities.includes(
+                                            'Other',
+                                        ) ? (
                                             <div className="grid gap-1.5">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Title
+                                                <label className="text-sm font-medium">
+                                                    Specify other social
+                                                    activity
+                                                    <span className="text-[11px] font-semibold text-red-600">
+                                                        {' '}
+                                                        *
+                                                    </span>
                                                 </label>
-                                                <SearchableCommandSelect
-                                                    value={attendee.title}
-                                                    options={
-                                                        ASEMME10_TITLE_SELECT_OPTIONS
+                                                <Input
+                                                    placeholder="Enter the activity"
+                                                    value={
+                                                        asemme10DelegationForm
+                                                            .data.delegation
+                                                            .social_activity_other
                                                     }
-                                                    placeholder="Select title"
-                                                    searchPlaceholder="Search title..."
-                                                    emptyText="No title found."
-                                                    onValueChange={(value) =>
-                                                        setAsemme10AttendeeTitle(
-                                                            index,
-                                                            value,
+                                                    onChange={(event) =>
+                                                        updateAsemme10Delegation(
+                                                            'social_activity_other',
+                                                            event.target.value,
                                                         )
                                                     }
                                                 />
-                                                {attendee.title === 'Other' ? (
+                                                {asemme10DelegationError(
+                                                    'delegation.social_activity_other',
+                                                ) ? (
+                                                    <div className="text-xs text-red-600">
+                                                        {asemme10DelegationError(
+                                                            'delegation.social_activity_other',
+                                                        )}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
+                                    </div>
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Bilateral meeting interest
+                                        </label>
+                                        <SearchableCommandSelect
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .delegation
+                                                    .bilateral_meeting_interest
+                                            }
+                                            options={
+                                                ASEMME10_BILATERAL_MEETING_OPTIONS
+                                            }
+                                            placeholder="Select interest"
+                                            searchPlaceholder="Search meeting interest..."
+                                            emptyText="No option found."
+                                            onValueChange={(value) =>
+                                                updateAsemme10Delegation(
+                                                    'bilateral_meeting_interest',
+                                                    value,
+                                                )
+                                            }
+                                        />
+                                    </div>
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Bilateral contact emails
+                                        </label>
+                                        <Input
+                                            placeholder="email@example.com, another@example.com"
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .delegation
+                                                    .bilateral_contact_emails
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Delegation(
+                                                    'bilateral_contact_emails',
+                                                    event.target.value,
+                                                )
+                                            }
+                                        />
+                                    </div>
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Social activity details
+                                        </label>
+                                        <textarea
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .delegation
+                                                    .social_activity_details
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Delegation(
+                                                    'social_activity_details',
+                                                    event.target.value,
+                                                )
+                                            }
+                                            className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                        />
+                                    </div>
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-sm font-medium">
+                                            Bilateral meeting comments
+                                        </label>
+                                        <textarea
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .delegation
+                                                    .bilateral_comments
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Delegation(
+                                                    'bilateral_comments',
+                                                    event.target.value,
+                                                )
+                                            }
+                                            className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                        />
+                                    </div>
+
+                                    <div className="grid gap-1.5 sm:col-span-2">
+                                        <label className="text-sm font-medium">
+                                            Additional comments
+                                        </label>
+                                        <textarea
+                                            value={
+                                                asemme10DelegationForm.data
+                                                    .delegation
+                                                    .additional_comments
+                                            }
+                                            onChange={(event) =>
+                                                updateAsemme10Delegation(
+                                                    'additional_comments',
+                                                    event.target.value,
+                                                )
+                                            }
+                                            className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div>
+                                            <div className="text-sm font-semibold">
+                                                4. Participants to create
+                                            </div>
+                                            <div className="max-w-2xl text-xs text-slate-500 dark:text-slate-400">
+                                                Add one row for every person who
+                                                needs a QR code. Use each
+                                                attendee's own email when
+                                                available; leave it blank if the
+                                                focal will manage the ID.
+                                            </div>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={addAsemme10Attendee}
+                                        >
+                                            <Plus className="mr-2 h-4 w-4" />
+                                            Add participant
+                                        </Button>
+                                    </div>
+                                    {asemme10DelegationError('attendees') ? (
+                                        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                                            {asemme10DelegationError(
+                                                'attendees',
+                                            )}
+                                        </div>
+                                    ) : null}
+
+                                    {asemme10DelegationForm.data.attendees.map(
+                                        (attendee, index) => (
+                                            <div
+                                                key={`${attendee.role}-${index}`}
+                                                className="grid gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+                                            >
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <Badge variant="secondary">
+                                                        Participant {index + 1}:{' '}
+                                                        {asemme10RoleLabel(
+                                                            attendee.role,
+                                                        )}
+                                                    </Badge>
+                                                    {asemme10DelegationForm.data
+                                                        .attendees.length > 1 &&
+                                                    attendee.role !== 'head' ? (
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                removeAsemme10Attendee(
+                                                                    index,
+                                                                )
+                                                            }
+                                                        >
+                                                            <Trash2 className="mr-2 h-4 w-4" />
+                                                            Remove
+                                                        </Button>
+                                                    ) : null}
+                                                </div>
+
+                                                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                                                     <div className="grid gap-1.5">
-                                                        <Input
-                                                            placeholder="Specify title"
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Title
+                                                        </label>
+                                                        <SearchableCommandSelect
                                                             value={
-                                                                attendee.title_other
+                                                                attendee.title
+                                                            }
+                                                            options={
+                                                                ASEMME10_TITLE_SELECT_OPTIONS
+                                                            }
+                                                            placeholder="Select title"
+                                                            searchPlaceholder="Search title..."
+                                                            emptyText="No title found."
+                                                            onValueChange={(
+                                                                value,
+                                                            ) =>
+                                                                setAsemme10AttendeeTitle(
+                                                                    index,
+                                                                    value,
+                                                                )
+                                                            }
+                                                        />
+                                                        {attendee.title ===
+                                                        'Other' ? (
+                                                            <div className="grid gap-1.5">
+                                                                <Input
+                                                                    placeholder="Specify title"
+                                                                    value={
+                                                                        attendee.title_other
+                                                                    }
+                                                                    onChange={(
+                                                                        event,
+                                                                    ) =>
+                                                                        updateAsemme10Attendee(
+                                                                            index,
+                                                                            'title_other',
+                                                                            event
+                                                                                .target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                />
+                                                                {asemme10AttendeeError(
+                                                                    index,
+                                                                    'title_other',
+                                                                ) ? (
+                                                                    <div className="text-xs text-red-600">
+                                                                        {asemme10AttendeeError(
+                                                                            index,
+                                                                            'title_other',
+                                                                        )}
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                    <div className="grid gap-1.5">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Given name
+                                                            <span className="text-red-600">
+                                                                {' '}
+                                                                *
+                                                            </span>
+                                                        </label>
+                                                        <Input
+                                                            placeholder="First / given name"
+                                                            value={
+                                                                attendee.given_name
                                                             }
                                                             onChange={(event) =>
                                                                 updateAsemme10Attendee(
                                                                     index,
-                                                                    'title_other',
+                                                                    'given_name',
                                                                     event.target
                                                                         .value,
                                                                 )
@@ -5977,235 +6449,218 @@ export default function ParticipantPage(props: PageProps) {
                                                         />
                                                         {asemme10AttendeeError(
                                                             index,
-                                                            'title_other',
+                                                            'given_name',
                                                         ) ? (
                                                             <div className="text-xs text-red-600">
                                                                 {asemme10AttendeeError(
                                                                     index,
-                                                                    'title_other',
+                                                                    'given_name',
                                                                 )}
                                                             </div>
                                                         ) : null}
                                                     </div>
-                                                ) : null}
-                                            </div>
-                                            <div className="grid gap-1.5">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Given name
-                                                    <span className="text-red-600">
-                                                        {' '}
-                                                        *
-                                                    </span>
-                                                </label>
-                                                <Input
-                                                    placeholder="First / given name"
-                                                    value={attendee.given_name}
-                                                    onChange={(event) =>
-                                                        updateAsemme10Attendee(
-                                                            index,
-                                                            'given_name',
-                                                            event.target.value,
-                                                        )
-                                                    }
-                                                />
-                                                {asemme10AttendeeError(
-                                                    index,
-                                                    'given_name',
-                                                ) ? (
-                                                    <div className="text-xs text-red-600">
-                                                        {asemme10AttendeeError(
-                                                            index,
-                                                            'given_name',
-                                                        )}
-                                                    </div>
-                                                ) : null}
-                                            </div>
-                                            <div className="grid gap-1.5">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Family name
-                                                    <span className="text-red-600">
-                                                        {' '}
-                                                        *
-                                                    </span>
-                                                </label>
-                                                <Input
-                                                    placeholder="Last / family name"
-                                                    value={attendee.family_name}
-                                                    onChange={(event) =>
-                                                        updateAsemme10Attendee(
-                                                            index,
-                                                            'family_name',
-                                                            event.target.value,
-                                                        )
-                                                    }
-                                                />
-                                                {asemme10AttendeeError(
-                                                    index,
-                                                    'family_name',
-                                                ) ? (
-                                                    <div className="text-xs text-red-600">
+                                                    <div className="grid gap-1.5">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Family name
+                                                            <span className="text-red-600">
+                                                                {' '}
+                                                                *
+                                                            </span>
+                                                        </label>
+                                                        <Input
+                                                            placeholder="Last / family name"
+                                                            value={
+                                                                attendee.family_name
+                                                            }
+                                                            onChange={(event) =>
+                                                                updateAsemme10Attendee(
+                                                                    index,
+                                                                    'family_name',
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                        />
                                                         {asemme10AttendeeError(
                                                             index,
                                                             'family_name',
-                                                        )}
+                                                        ) ? (
+                                                            <div className="text-xs text-red-600">
+                                                                {asemme10AttendeeError(
+                                                                    index,
+                                                                    'family_name',
+                                                                )}
+                                                            </div>
+                                                        ) : null}
                                                     </div>
-                                                ) : null}
-                                            </div>
-                                            <div className="grid gap-1.5">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Badge name
-                                                </label>
-                                                <Input
-                                                    placeholder="Name to print on ID"
-                                                    value={attendee.badge_name}
-                                                    onChange={(event) =>
-                                                        updateAsemme10Attendee(
-                                                            index,
-                                                            'badge_name',
-                                                            event.target.value,
-                                                        )
-                                                    }
-                                                />
-                                            </div>
-                                            <div className="grid gap-1.5">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Organization / ministry
-                                                </label>
-                                                <Input
-                                                    placeholder="Ministry, agency, or organization"
-                                                    value={
-                                                        attendee.organization_name
-                                                    }
-                                                    onChange={(event) =>
-                                                        updateAsemme10Attendee(
-                                                            index,
-                                                            'organization_name',
-                                                            event.target.value,
-                                                        )
-                                                    }
-                                                />
-                                            </div>
-                                            <div className="grid gap-1.5">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Position / job title
-                                                </label>
-                                                <Input
-                                                    placeholder="Official position"
-                                                    value={
-                                                        attendee.position_title
-                                                    }
-                                                    onChange={(event) =>
-                                                        updateAsemme10Attendee(
-                                                            index,
-                                                            'position_title',
-                                                            event.target.value,
-                                                        )
-                                                    }
-                                                />
-                                            </div>
-                                            <div className="grid gap-1.5 sm:col-span-2">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Participant email
-                                                </label>
-                                                <Input
-                                                    type="email"
-                                                    placeholder="Use participant email if available"
-                                                    value={attendee.email}
-                                                    onChange={(event) =>
-                                                        updateAsemme10Attendee(
-                                                            index,
-                                                            'email',
-                                                            event.target.value,
-                                                        )
-                                                    }
-                                                />
-                                                {asemme10AttendeeError(
-                                                    index,
-                                                    'email',
-                                                ) ? (
-                                                    <div className="text-xs text-red-600">
+                                                    <div className="grid gap-1.5">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Badge name
+                                                        </label>
+                                                        <Input
+                                                            placeholder="Name to print on ID"
+                                                            value={
+                                                                attendee.badge_name
+                                                            }
+                                                            onChange={(event) =>
+                                                                updateAsemme10Attendee(
+                                                                    index,
+                                                                    'badge_name',
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                        />
+                                                    </div>
+                                                    <div className="grid gap-1.5">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Organization /
+                                                            ministry
+                                                        </label>
+                                                        <Input
+                                                            placeholder="Ministry, agency, or organization"
+                                                            value={
+                                                                attendee.organization_name
+                                                            }
+                                                            onChange={(event) =>
+                                                                updateAsemme10Attendee(
+                                                                    index,
+                                                                    'organization_name',
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                        />
+                                                    </div>
+                                                    <div className="grid gap-1.5">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Position / job title
+                                                        </label>
+                                                        <Input
+                                                            placeholder="Official position"
+                                                            value={
+                                                                attendee.position_title
+                                                            }
+                                                            onChange={(event) =>
+                                                                updateAsemme10Attendee(
+                                                                    index,
+                                                                    'position_title',
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                        />
+                                                    </div>
+                                                    <div className="grid gap-1.5 sm:col-span-2">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Participant email
+                                                        </label>
+                                                        <Input
+                                                            type="email"
+                                                            placeholder="Use participant email if available"
+                                                            value={
+                                                                attendee.email
+                                                            }
+                                                            onChange={(event) =>
+                                                                updateAsemme10Attendee(
+                                                                    index,
+                                                                    'email',
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                        />
                                                         {asemme10AttendeeError(
                                                             index,
                                                             'email',
+                                                        ) ? (
+                                                            <div className="text-xs text-red-600">
+                                                                {asemme10AttendeeError(
+                                                                    index,
+                                                                    'email',
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                                Leave blank when
+                                                                the focal person
+                                                                will
+                                                                receive/manage
+                                                                the ID.
+                                                            </div>
                                                         )}
                                                     </div>
-                                                ) : (
-                                                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                                                        Leave blank when the
-                                                        focal person will
-                                                        receive/manage the ID.
+                                                </div>
+
+                                                <div className="grid gap-3 sm:grid-cols-2">
+                                                    <div className="grid gap-1.5">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Dietary requirements
+                                                        </label>
+                                                        <textarea
+                                                            placeholder="Food restrictions, allergies, or halal/vegetarian needs"
+                                                            value={
+                                                                attendee.dietary_requirements
+                                                            }
+                                                            onChange={(event) =>
+                                                                updateAsemme10Attendee(
+                                                                    index,
+                                                                    'dietary_requirements',
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                            className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                                        />
                                                     </div>
-                                                )}
+                                                    <div className="grid gap-1.5">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                            Mobility or special
+                                                            needs
+                                                        </label>
+                                                        <textarea
+                                                            placeholder="Accessibility, mobility, or other assistance needed"
+                                                            value={
+                                                                attendee.mobility_or_special_needs
+                                                            }
+                                                            onChange={(event) =>
+                                                                updateAsemme10Attendee(
+                                                                    index,
+                                                                    'mobility_or_special_needs',
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                            className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                                                        />
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </div>
-
-                                        <div className="grid gap-3 sm:grid-cols-2">
-                                            <div className="grid gap-1.5">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Dietary requirements
-                                                </label>
-                                                <textarea
-                                                    placeholder="Food restrictions, allergies, or halal/vegetarian needs"
-                                                    value={
-                                                        attendee.dietary_requirements
-                                                    }
-                                                    onChange={(event) =>
-                                                        updateAsemme10Attendee(
-                                                            index,
-                                                            'dietary_requirements',
-                                                            event.target.value,
-                                                        )
-                                                    }
-                                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-                                                />
-                                            </div>
-                                            <div className="grid gap-1.5">
-                                                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                    Mobility or special needs
-                                                </label>
-                                                <textarea
-                                                    placeholder="Accessibility, mobility, or other assistance needed"
-                                                    value={
-                                                        attendee.mobility_or_special_needs
-                                                    }
-                                                    onChange={(event) =>
-                                                        updateAsemme10Attendee(
-                                                            index,
-                                                            'mobility_or_special_needs',
-                                                            event.target.value,
-                                                        )
-                                                    }
-                                                    className="min-h-20 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ),
-                            )}
-                        </div>
-
+                                        ),
+                                    )}
+                                </div>
                             </div>
 
                             <DialogFooter className="shrink-0 gap-2 border-t border-slate-200/70 px-5 py-4 sm:px-8 dark:border-slate-800">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() =>
-                                    setAsemme10DelegationDialogOpen(false)
-                                }
-                                disabled={asemme10DelegationForm.processing}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                type="submit"
-                                className={PRIMARY_BTN}
-                                disabled={asemme10DelegationForm.processing}
-                            >
-                                Save Delegation Participants
-                            </Button>
-                        </DialogFooter>
-                    </form>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() =>
+                                        setAsemme10DelegationDialogOpen(false)
+                                    }
+                                    disabled={asemme10DelegationForm.processing}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    type="submit"
+                                    className={PRIMARY_BTN}
+                                    disabled={asemme10DelegationForm.processing}
+                                >
+                                    Save Delegation Participants
+                                </Button>
+                            </DialogFooter>
+                        </form>
                     </div>
                 </DialogContent>
             </Dialog>
@@ -6229,30 +6684,37 @@ export default function ParticipantPage(props: PageProps) {
                         <div className="flex-1 overflow-y-auto px-4 pb-4 sm:px-0 sm:pb-0">
                             {virtualIdParticipant ? (
                                 <div className="mx-auto w-full">
-                                    {/* Horizontal scroll for landscape card on small screens */}
-                                    <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-                                        <div className="mx-auto w-fit max-w-full">
-                                            <div className="min-w-[520px] sm:min-w-0">
-                                                <ParticipantIdPrintCard
-                                                    participant={
-                                                        virtualIdParticipant
-                                                    }
-                                                    qrDataUrl={
-                                                        qrDataUrls[
-                                                            virtualIdParticipant
-                                                                .id
-                                                        ]
-                                                    }
-                                                    orientation="landscape"
-                                                />
-                                            </div>
+                                    <div className="mx-auto h-[164px] w-[260px] overflow-hidden min-[360px]:h-[189px] min-[360px]:w-[300px] min-[390px]:h-[208px] min-[390px]:w-[330px] min-[430px]:h-[234px] min-[430px]:w-[370px] min-[480px]:h-[267px] min-[480px]:w-[424px] sm:hidden">
+                                        <div className="origin-top-left scale-50 min-[360px]:scale-[0.577] min-[390px]:scale-[0.635] min-[430px]:scale-[0.712] min-[480px]:scale-[0.815]">
+                                            <ParticipantIdPrintCard
+                                                participant={
+                                                    virtualIdParticipant
+                                                }
+                                                qrDataUrl={
+                                                    qrDataUrls[
+                                                        virtualIdParticipant.id
+                                                    ]
+                                                }
+                                                orientation="landscape"
+                                            />
                                         </div>
                                     </div>
 
-                                    <p className="mt-2 text-center text-xs text-slate-500 sm:hidden">
-                                        Tip: swipe left/right to view the full
-                                        ID.
-                                    </p>
+                                    <div className="hidden justify-center sm:flex">
+                                        <div className="w-fit">
+                                            <ParticipantIdPrintCard
+                                                participant={
+                                                    virtualIdParticipant
+                                                }
+                                                qrDataUrl={
+                                                    qrDataUrls[
+                                                        virtualIdParticipant.id
+                                                    ]
+                                                }
+                                                orientation="landscape"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
