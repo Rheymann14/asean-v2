@@ -164,6 +164,7 @@ const ENDPOINTS = {
     venues: {
         store: '/venues',
         update: (id: number) => `/venues/${id}`,
+        destroy: (id: number) => `/venues/${id}`,
     },
 };
 
@@ -792,6 +793,10 @@ export default function EventManagement(props: PageProps) {
     const [venueTarget, setVenueTarget] = React.useState<ProgrammeRow | null>(
         null,
     );
+    const [venueDeleteOpen, setVenueDeleteOpen] = React.useState(false);
+    const [venueDeleteTarget, setVenueDeleteTarget] =
+        React.useState<ProgrammeRow | null>(null);
+    const [venueDeleting, setVenueDeleting] = React.useState(false);
 
     const venueForm = useForm<{
         name: string;
@@ -1231,6 +1236,35 @@ export default function EventManagement(props: PageProps) {
         } else {
             venueForm.post(ENDPOINTS.venues.store, options);
         }
+    }
+
+    function requestVenueDelete(item: ProgrammeRow) {
+        if (!item.venue?.id) return;
+
+        setVenueDeleteTarget(item);
+        setVenueDeleteOpen(true);
+    }
+
+    function confirmVenueDelete() {
+        const venueId = venueDeleteTarget?.venue?.id;
+        if (!venueId) return;
+
+        router.delete(ENDPOINTS.venues.destroy(venueId), {
+            preserveScroll: true,
+            onStart: () => setVenueDeleting(true),
+            onFinish: () => {
+                setVenueDeleting(false);
+                setVenueDeleteOpen(false);
+                setVenueDeleteTarget(null);
+            },
+            onSuccess: () => {
+                setVenueTarget(null);
+                venueForm.reset();
+                venueForm.clearErrors();
+                toast.success('Venue removed.');
+            },
+            onError: () => toast.error('Unable to remove venue.'),
+        });
     }
 
     function toggleExpanded(id: number) {
@@ -3285,26 +3319,89 @@ export default function EventManagement(props: PageProps) {
                             </div>
                         </div>
 
-                        <DialogFooter className="gap-2 sm:gap-0">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={closeVenueDialog}
-                                disabled={venueForm.processing}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                type="submit"
-                                className={PRIMARY_BTN}
-                                disabled={venueForm.processing}
-                            >
-                                Save venue
-                            </Button>
+                        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+                            <div>
+                                {venueTarget?.venue ? (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900/60 dark:hover:bg-red-950/40"
+                                        onClick={() =>
+                                            requestVenueDelete(venueTarget)
+                                        }
+                                        disabled={
+                                            venueForm.processing ||
+                                            venueDeleting
+                                        }
+                                    >
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        Remove venue
+                                    </Button>
+                                ) : null}
+                            </div>
+
+                            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={closeVenueDialog}
+                                    disabled={venueForm.processing}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    type="submit"
+                                    className={PRIMARY_BTN}
+                                    disabled={venueForm.processing}
+                                >
+                                    Save venue
+                                </Button>
+                            </div>
                         </DialogFooter>
                     </form>
                 </DialogContent>
             </Dialog>
+
+            {/* Delete Venue Confirm */}
+            <AlertDialog
+                open={venueDeleteOpen}
+                onOpenChange={setVenueDeleteOpen}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            Remove this venue?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will permanently remove{' '}
+                            <span className="font-semibold text-slate-900 dark:text-slate-100">
+                                {venueDeleteTarget?.venue?.name ??
+                                    'this venue'}
+                            </span>{' '}
+                            from{' '}
+                            <span className="font-semibold text-slate-900 dark:text-slate-100">
+                                {venueDeleteTarget?.title ?? 'this event'}
+                            </span>
+                            . The event will remain.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel
+                            onClick={() => setVenueDeleteOpen(false)}
+                            disabled={venueDeleting}
+                        >
+                            Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-red-600 hover:bg-red-700"
+                            onClick={confirmVenueDelete}
+                            disabled={venueDeleting}
+                        >
+                            Remove venue
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             {/* Delete Confirm */}
             <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>

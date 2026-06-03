@@ -59,32 +59,58 @@ class VenueController extends Controller
 
     public function publicIndex()
     {
+        $venuePayload = fn (Venue $venue) => [
+            'id' => $venue->id,
+            'programme_id' => $venue->programme_id,
+            'name' => $venue->name,
+            'address' => $venue->address,
+            'google_maps_url' => $venue->google_maps_url,
+            'embed_url' => $venue->embed_url,
+            'programme' => $venue->programme
+                ? [
+                    'id' => $venue->programme->id,
+                    'title' => $venue->programme->title,
+                    'starts_at' => $venue->programme->starts_at?->toISOString(),
+                    'ends_at' => $venue->programme->ends_at?->toISOString(),
+                ]
+                : null,
+        ];
+
+        $activeRegistrationProgramme = Programme::query()
+            ->where('is_active', true)
+            ->where('is_registration_active', true)
+            ->first();
+
         $venues = Venue::query()
             ->with('programme')
             ->where('is_active', true)
-            ->where(function ($query) {
-                $query->whereNull('programme_id')
-                    ->orWhereHas('programme', fn ($subQuery) => $subQuery->where('is_active', true));
-            })
+            ->when(
+                $activeRegistrationProgramme,
+                fn ($query) => $query->where('programme_id', $activeRegistrationProgramme->id),
+                fn ($query) => $query->whereRaw('1 = 0')
+            )
+            ->orderBy('id')
+            ->get()
+            ->map($venuePayload)
+            ->values();
+
+        $allVenues = Venue::query()
+            ->with('programme')
+            ->where('is_active', true)
+            ->whereHas('programme', fn ($query) => $query->where('is_active', true))
             ->get()
             ->sortBy(fn (Venue $venue) => $venue->programme?->starts_at)
             ->values()
-            ->map(fn (Venue $venue) => [
-                'id' => $venue->id,
-                'programme_id' => $venue->programme_id,
-                'name' => $venue->name,
-                'address' => $venue->address,
-                'google_maps_url' => $venue->google_maps_url,
-                'embed_url' => $venue->embed_url,
-                'programme' => $venue->programme
-                    ? [
-                        'id' => $venue->programme->id,
-                        'title' => $venue->programme->title,
-                        'starts_at' => $venue->programme->starts_at?->toISOString(),
-                        'ends_at' => $venue->programme->ends_at?->toISOString(),
-                    ]
-                    : null,
-            ]);
+            ->map($venuePayload);
+
+        $activeRegistrationProgrammeData = $activeRegistrationProgramme
+            ? [
+                'id' => $activeRegistrationProgramme->id,
+                'title' => $activeRegistrationProgramme->title,
+                'starts_at' => $activeRegistrationProgramme->starts_at?->toISOString(),
+                'ends_at' => $activeRegistrationProgramme->ends_at?->toISOString(),
+            ]
+            : null;
 
         $section = VenueSection::query()
             ->with(['images' => fn ($query) => $query->orderBy('id')])
@@ -105,6 +131,8 @@ class VenueController extends Controller
 
         return Inertia::render('venue', [
             'venues' => $venues,
+            'all_venues' => $allVenues,
+            'active_registration_programme' => $activeRegistrationProgrammeData,
             'section' => $sectionData,
         ]);
     }

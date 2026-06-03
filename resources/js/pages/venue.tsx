@@ -3,6 +3,7 @@ import PublicLayout from '@/layouts/public-layout';
 import { Head } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
     Dialog,
@@ -19,6 +20,7 @@ import {
     ChevronUp,
     X,
     ImageOff,
+    Search,
 } from 'lucide-react';
 
 type ProgrammeRow = {
@@ -64,6 +66,8 @@ type VenueSection = {
 
 type PageProps = {
     venues?: VenueRow[];
+    all_venues?: VenueRow[];
+    active_registration_programme?: ProgrammeRow | null;
     section?: VenueSection | null;
 };
 
@@ -260,8 +264,8 @@ function NoImageFallback({ label = 'No image uploaded' }: { label?: string }) {
     );
 }
 
-export default function Venue({ venues = [], section }: PageProps) {
-    const eventVenues = React.useMemo(() => {
+export default function Venue({ venues = [], all_venues = [], active_registration_programme, section }: PageProps) {
+    const activeEventVenues = React.useMemo(() => {
         return venues.map((venue) => ({
             id: String(venue.id),
             label: venue.programme?.title ?? venue.name,
@@ -274,6 +278,40 @@ export default function Venue({ venues = [], section }: PageProps) {
             tip: 'Tap “Open in Google Maps” for the exact pin and navigation directions.',
         }));
     }, [venues]);
+    const allEventVenues = React.useMemo(() => {
+        return all_venues.map((venue) => ({
+            id: String(venue.id),
+            label: venue.programme?.title ?? venue.name,
+            dateLabel:
+                formatDateRange(venue.programme?.starts_at ?? null, venue.programme?.ends_at ?? null) ?? undefined,
+            venueName: venue.name,
+            address: venue.address,
+            googleMapsLink: venue.google_maps_url ?? undefined,
+            embedUrl: venue.embed_url ?? undefined,
+            tip: 'Tap "Open in Google Maps" for the exact pin and navigation directions.',
+        }));
+    }, [all_venues]);
+    const [showAllVenues, setShowAllVenues] = React.useState(false);
+    const [venueSearch, setVenueSearch] = React.useState('');
+
+    const searchedAllEventVenues = React.useMemo(() => {
+        const query = venueSearch.trim().toLowerCase();
+        if (!query) return allEventVenues;
+
+        return allEventVenues.filter((event) =>
+            [event.label, event.venueName, event.address, event.dateLabel]
+                .filter(Boolean)
+                .some((value) => String(value).toLowerCase().includes(query)),
+        );
+    }, [allEventVenues, venueSearch]);
+
+    const eventVenues = showAllVenues ? searchedAllEventVenues : activeEventVenues;
+    const activeRegistrationTitle = active_registration_programme?.title?.trim() || 'Current registration';
+    const canBrowseAllVenues = allEventVenues.length > 0;
+
+    React.useEffect(() => {
+        if (!showAllVenues) setVenueSearch('');
+    }, [showAllVenues]);
 
     const sectionTitle = section?.title?.trim() || 'Section Title';
     const sectionItems = section?.items ?? [];
@@ -336,6 +374,54 @@ export default function Venue({ venues = [], section }: PageProps) {
 
                     {/* ✅ Event Tabs */}
                     <div className="mx-auto mt-10 max-w-6xl">
+                        <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/40 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                    {showAllVenues ? 'All event venues' : 'Current registration venue'}
+                                </p>
+                                <p className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-50">
+                                    {showAllVenues
+                                        ? `${allEventVenues.length.toLocaleString()} venue${allEventVenues.length === 1 ? '' : 's'} available`
+                                        : activeRegistrationTitle}
+                                </p>
+                            </div>
+
+                            {canBrowseAllVenues ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-10 shrink-0 rounded-xl"
+                                    onClick={() => setShowAllVenues((value) => !value)}
+                                >
+                                    {showAllVenues ? 'Show current registration venue' : 'See all event venues'}
+                                </Button>
+                            ) : null}
+                        </div>
+
+                        {showAllVenues ? (
+                            <div className="mb-5">
+                                <div className="relative">
+                                    <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                    <Input
+                                        value={venueSearch}
+                                        onChange={(event) => setVenueSearch(event.target.value)}
+                                        placeholder="Search by event, venue, or address"
+                                        className="h-11 rounded-xl bg-white pr-10 pl-9 dark:bg-slate-950"
+                                    />
+                                    {venueSearch ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setVenueSearch('')}
+                                            className="absolute top-1/2 right-2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-white/10 dark:hover:text-slate-100"
+                                            aria-label="Clear venue search"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    ) : null}
+                                </div>
+                            </div>
+                        ) : null}
+
                         {eventVenues.length === 0 ? (
                             <Card className="relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white/70 p-8 text-center shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/55 dark:border-white/10 dark:bg-slate-900/35">
                                 <div
@@ -353,11 +439,13 @@ export default function Venue({ venues = [], section }: PageProps) {
                                     </div>
 
                                     <p className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">
-                                        No venues yet
+                                        {showAllVenues && venueSearch.trim() ? 'No matching venues' : 'No venues yet'}
                                     </p>
 
                                     <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-                                        Please check back soon for venue updates.
+                                        {showAllVenues && venueSearch.trim()
+                                            ? 'Try a different event, venue, or address.'
+                                            : 'Please check back soon for current registration venue updates.'}
                                     </p>
 
                                     <div className="mt-5 h-px w-24 bg-gradient-to-r from-transparent via-slate-200 to-transparent dark:via-white/10" />
