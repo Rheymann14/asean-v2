@@ -1009,7 +1009,7 @@ export default function Welcome({ canRegister = true }: { canRegister?: boolean 
                 {/* 2. 3D RING LEADERSHIP */}
                 {/* 2. 3D RING LEADERSHIP (fade-in on reach) */}
                 <motion.section
-                    className="relative z-30 h-[680px] w-full overflow-hidden py-20"
+                    className="relative z-30 hidden h-[680px] w-full overflow-hidden py-20"
                     initial="hidden"
                     whileInView="show"
                     viewport={{ once: true, amount: 0.25 }} // ✅ triggers only when section is reached

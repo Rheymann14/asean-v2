@@ -4923,7 +4923,7 @@ export default function ParticipantPage(props: PageProps) {
                                                                                                     <div className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
                                                                                                         <div>
                                                                                                             {asemme10Registration.focal_name ??
-                                                                                                                'â€”'}
+                                                                                                                '-'}
                                                                                                         </div>
                                                                                                         {asemme10Registration.focal_email && (
                                                                                                             <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -4949,7 +4949,7 @@ export default function ParticipantPage(props: PageProps) {
                                                                                                     </div>
                                                                                                     <div className="text-sm text-slate-700 dark:text-slate-300">
                                                                                                         {asemme10Registration.focal_organization ??
-                                                                                                            'â€”'}
+                                                                                                            '-'}
                                                                                                     </div>
                                                                                                     {asemme10Registration.focal_position && (
                                                                                                         <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
