@@ -25,6 +25,14 @@ class WelcomeNotificationService
 
     private function sendWelcomeEmail(User $user): void
     {
+        if (! $user->email) {
+            Log::info('Welcome email skipped: participant has no email.', [
+                'user_id' => $user->id,
+            ]);
+
+            return;
+        }
+
         try {
             if ($this->sendViaBrevoApi($user)) {
                 return;

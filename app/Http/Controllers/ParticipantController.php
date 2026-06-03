@@ -203,7 +203,7 @@ class ParticipantController extends Controller
                         'profile_image_url' => $user?->profile_photo_path ? asset($user->profile_photo_path) : null,
                         'profile_photo_url' => $user?->profile_photo_path ? asset($user->profile_photo_path) : null,
                         'profile_photo_path' => $user?->profile_photo_path,
-                        'email' => $attendee->email ?: ($user?->email ?? ''),
+                        'email' => $attendee->email ?? '',
                         'contact_number' => $user?->contact_number,
                         'contact_country_code' => $user?->contact_country_code,
                         'country_id' => $country?->id,

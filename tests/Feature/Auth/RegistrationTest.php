@@ -384,6 +384,98 @@ test('ASEMME10 delegation registration creates scannable participants', function
     }
 });
 
+test('ASEMME10 delegation registration keeps blank attendee emails empty', function () {
+    Mail::fake();
+
+    $adminType = UserType::query()->create([
+        'name' => 'ADMIN',
+        'slug' => 'ADMIN',
+        'is_active' => true,
+    ]);
+
+    $country = Country::query()->create([
+        'code' => 'PHL',
+        'name' => 'Philippines',
+        'is_active' => true,
+    ]);
+
+    UserType::query()->create([
+        'name' => 'Government Official',
+        'slug' => 'government-official',
+        'is_active' => true,
+    ]);
+
+    $admin = User::factory()->create([
+        'user_type_id' => $adminType->id,
+    ]);
+    $owner = User::factory()->create();
+    $programme = Programme::query()->create([
+        'user_id' => $owner->id,
+        'tag' => 'ASEMME10',
+        'title' => '10th Asia-Europe Meeting of Ministers for Education (ASEMME10)',
+        'description' => 'ASEMME10 registration',
+        'starts_at' => now()->addMonth(),
+        'ends_at' => now()->addMonth()->addDays(2),
+        'location' => 'Manila',
+        'is_active' => true,
+    ]);
+
+    $response = $this->actingAs($admin)->post(route('participants.asemme10-registration.store'), [
+        'programme_id' => $programme->id,
+        'country_id' => $country->id,
+        'registration_type' => 'ASEAN Secretariat',
+        'focal' => [
+            'name' => 'CHED LO',
+            'email' => 'focal@example.test',
+            'phone' => '+639171234567',
+            'organization' => 'CHED',
+            'position' => 'Focal',
+        ],
+        'consents' => [
+            'data_collection' => true,
+            'data_storage' => true,
+            'photo_video' => true,
+        ],
+        'delegation' => [
+            'social_activities' => [],
+        ],
+        'attendees' => [
+            [
+                'role' => 'head',
+                'title' => 'Mr',
+                'given_name' => 'Test',
+                'family_name' => 'Participant',
+                'badge_name' => 'Test Participant',
+                'organization_name' => 'ASEAN Secretariat',
+                'position_title' => 'Head',
+                'email' => '',
+                'dietary_requirements' => '',
+                'mobility_or_special_needs' => '',
+            ],
+        ],
+    ]);
+
+    $response->assertRedirect();
+    $response->assertSessionHas('status', 'asemme10-registered');
+
+    $participant = User::query()->where('name', 'Test Participant')->firstOrFail();
+    $attendee = EventRegistrationAttendee::query()->where('user_id', $participant->id)->firstOrFail();
+
+    expect($participant->email)->toBeNull();
+    expect($attendee->email)->toBeNull();
+    expect($participant->display_id)->not->toBeNull();
+    expect($participant->qr_payload)->not->toBeNull();
+
+    $this->actingAs($admin)
+        ->get(route('participant', ['programme_id' => $programme->id]))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('participant')
+            ->where('participants.0.full_name', 'Test Participant')
+            ->where('participants.0.email', '')
+        );
+});
+
 test('ASEMME10 registration rejects attendee email already joined to selected event', function () {
     Mail::fake();
 

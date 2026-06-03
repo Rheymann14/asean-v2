@@ -106,12 +106,22 @@ class Asemme10RegistrationController extends Controller
             ]);
         }
 
+        $seenEmails = [];
+
         foreach ($attendees as $index => $attendee) {
             $email = Str::lower(trim((string) ($attendee['email'] ?? '')));
 
             if ($email === '') {
                 continue;
             }
+
+            if (in_array($email, $seenEmails, true)) {
+                throw ValidationException::withMessages([
+                    "attendees.{$index}.email" => 'Each participant email must be unique.',
+                ]);
+            }
+
+            $seenEmails[] = $email;
 
             $alreadyJoined = User::query()
                 ->whereRaw('LOWER(email) = ?', [$email])
@@ -256,7 +266,7 @@ class Asemme10RegistrationController extends Controller
 
         $user = User::query()->create([
             'name' => $this->attendeeFullName($attendee),
-            'email' => $canUseEmail ? $email : $this->placeholderEmail($programme, $attendee),
+            'email' => $canUseEmail ? $email : null,
             'password' => Str::random(32),
             'country_id' => $validated['country_id'] ?? null,
             'user_type_id' => $this->participantUserTypeId(),
@@ -326,30 +336,6 @@ class Asemme10RegistrationController extends Controller
         return $this->blankToNull($attendee['title'] ?? null);
     }
 
-    /**
-     * @param  array<string, mixed>  $attendee
-     */
-    private function placeholderEmail(Programme $programme, array $attendee): string
-    {
-        $base = Str::of($this->attendeeFullName($attendee))
-            ->lower()
-            ->replaceMatches('/[^a-z0-9]+/', '.')
-            ->trim('.')
-            ->limit(40, '')
-            ->value() ?: 'participant';
-
-        do {
-            $email = sprintf(
-                'asemme10-%s-%s-%s@no-email.local',
-                $programme->id,
-                $base,
-                Str::lower(Str::random(8)),
-            );
-        } while (User::query()->where('email', $email)->exists());
-
-        return $email;
-    }
-
     private function participantUserTypeId(): ?int
     {
         return UserType::query()
@@ -376,7 +362,7 @@ class Asemme10RegistrationController extends Controller
     {
         $email = Str::lower(trim((string) ($attendee['email'] ?? '')));
 
-        return $email !== '' && Str::lower($user->email) === $email;
+        return $email !== '' && Str::lower((string) $user->email) === $email;
     }
 
     private function sendParticipantConfirmations(EventRegistrationSubmission $submission): void
@@ -384,7 +370,7 @@ class Asemme10RegistrationController extends Controller
         $submission->loadMissing('attendees.user');
 
         foreach ($submission->attendees as $attendee) {
-            if (! $attendee->email || Str::lower($attendee->user->email) !== Str::lower($attendee->email)) {
+            if (! $attendee->email || Str::lower((string) $attendee->user?->email) !== Str::lower($attendee->email)) {
                 continue;
             }
 
