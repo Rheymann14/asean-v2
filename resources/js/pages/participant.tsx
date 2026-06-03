@@ -1495,6 +1495,7 @@ export default function ParticipantPage(props: PageProps) {
         React.useState(false);
     const [participantFormCountryOpen, setParticipantFormCountryOpen] =
         React.useState(false);
+    const [asemme10CountryOpen, setAsemme10CountryOpen] = React.useState(false);
     const [participantFormTypeOpen, setParticipantFormTypeOpen] =
         React.useState(false);
     const [participantFormHonorificOpen, setParticipantFormHonorificOpen] =
@@ -1723,6 +1724,7 @@ export default function ParticipantPage(props: PageProps) {
             photo_video: boolean;
         };
         delegation: {
+            country: string;
             registration_type_other: string;
             social_activities: string[];
             social_activity_other: string;
@@ -1750,6 +1752,7 @@ export default function ParticipantPage(props: PageProps) {
             photo_video: false,
         },
         delegation: {
+            country: '',
             registration_type_other: '',
             social_activities: [],
             social_activity_other: '',
@@ -1930,23 +1933,6 @@ export default function ParticipantPage(props: PageProps) {
             ),
         [countries],
     );
-    const asemme10CountryOptions = React.useMemo(
-        () => [
-            {
-                value: '',
-                label: 'Select country',
-                description:
-                    'Choose the country represented by this delegation',
-            },
-            ...countries.map((country) => ({
-                value: String(country.id),
-                label: country.name,
-                description: country.code,
-            })),
-        ],
-        [countries],
-    );
-
     const orderedUserTypes = React.useMemo(() => {
         return [...userTypes].sort((a, b) => {
             const orderA = a.sequence_order ?? 0;
@@ -2143,6 +2129,9 @@ export default function ParticipantPage(props: PageProps) {
     const selectedFormCountry = participantForm.data.country_id
         ? countryById.get(Number(participantForm.data.country_id))
         : null;
+    const selectedAsemme10Country = asemme10DelegationForm.data.country_id
+        ? countryById.get(Number(asemme10DelegationForm.data.country_id))
+        : null;
     const selectedFormUserType = participantForm.data.user_type_id
         ? userTypeById.get(Number(participantForm.data.user_type_id))
         : null;
@@ -2290,6 +2279,11 @@ export default function ParticipantPage(props: PageProps) {
                 photo_video: false,
             },
             delegation: {
+                country:
+                    participantCountryFilter !== 'all'
+                        ? (countryById.get(Number(participantCountryFilter))
+                              ?.name ?? '')
+                        : '',
                 registration_type_other: '',
                 social_activities: [],
                 social_activity_other: '',
@@ -2419,15 +2413,58 @@ export default function ParticipantPage(props: PageProps) {
     function submitAsemme10Delegation(e: React.FormEvent) {
         e.preventDefault();
 
+        asemme10DelegationForm.transform((data) => ({
+            ...data,
+            programme_id: data.programme_id ? Number(data.programme_id) : null,
+            country_id: data.country_id ? Number(data.country_id) : null,
+            focal: {
+                name: data.focal.name.trim(),
+                email: data.focal.email.trim(),
+                phone: data.focal.phone.trim(),
+                organization: data.focal.organization.trim(),
+                position: data.focal.position.trim(),
+            },
+            delegation: {
+                ...data.delegation,
+                country:
+                    selectedAsemme10Country?.name ??
+                    data.delegation.country.trim(),
+                registration_type_other:
+                    data.delegation.registration_type_other.trim(),
+                social_activity_other:
+                    data.delegation.social_activity_other.trim(),
+                social_activity_details:
+                    data.delegation.social_activity_details.trim(),
+                bilateral_meeting_interest:
+                    data.delegation.bilateral_meeting_interest.trim(),
+                bilateral_contact_emails:
+                    data.delegation.bilateral_contact_emails.trim(),
+                bilateral_comments: data.delegation.bilateral_comments.trim(),
+                additional_comments: data.delegation.additional_comments.trim(),
+            },
+            attendees: data.attendees.map((attendee) => ({
+                ...attendee,
+                title: attendee.title.trim(),
+                title_other: attendee.title_other.trim(),
+                given_name: attendee.given_name.trim(),
+                family_name: attendee.family_name.trim(),
+                badge_name: attendee.badge_name.trim(),
+                organization_name: attendee.organization_name.trim(),
+                position_title: attendee.position_title.trim(),
+                email: attendee.email.trim(),
+                dietary_requirements: attendee.dietary_requirements.trim(),
+                mobility_or_special_needs:
+                    attendee.mobility_or_special_needs.trim(),
+            })),
+        }));
+
         asemme10DelegationForm.post(ENDPOINTS.participants.asemme10Delegation, {
             preserveScroll: true,
             onSuccess: () => {
                 setAsemme10DelegationDialogOpen(false);
                 toast.success('ASEMME10 delegation participants added.');
             },
-            onError: () => {
-                toast.error('Unable to save ASEMME10 delegation registration.');
-            },
+            onError: showToastError,
         });
     }
 
@@ -5893,22 +5930,201 @@ export default function ParticipantPage(props: PageProps) {
                                         <label className="text-sm font-medium">
                                             Country
                                         </label>
-                                        <SearchableCommandSelect
-                                            value={
-                                                asemme10DelegationForm.data
-                                                    .country_id
+                                        <Popover
+                                            open={asemme10CountryOpen}
+                                            onOpenChange={
+                                                setAsemme10CountryOpen
                                             }
-                                            options={asemme10CountryOptions}
-                                            placeholder="Select country"
-                                            searchPlaceholder="Search country..."
-                                            emptyText="No country found."
-                                            onValueChange={(value) =>
-                                                asemme10DelegationForm.setData(
-                                                    'country_id',
-                                                    value,
-                                                )
-                                            }
-                                        />
+                                        >
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    role="combobox"
+                                                    aria-expanded={
+                                                        asemme10CountryOpen
+                                                    }
+                                                    className="h-10 w-full justify-between text-left font-normal"
+                                                >
+                                                    <span className="flex min-w-0 items-center gap-2">
+                                                        {selectedAsemme10Country ? (
+                                                            <>
+                                                                <FlagThumb
+                                                                    country={
+                                                                        selectedAsemme10Country
+                                                                    }
+                                                                    size={24}
+                                                                />
+                                                                <span className="truncate">
+                                                                    {
+                                                                        selectedAsemme10Country.name
+                                                                    }
+                                                                </span>
+                                                            </>
+                                                        ) : (
+                                                            <span className="text-slate-500 dark:text-slate-400">
+                                                                Select
+                                                                country...
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent
+                                                className="z-50 w-[--radix-popover-trigger-width] p-0"
+                                                align="start"
+                                            >
+                                                <Command>
+                                                    <CommandInput placeholder="Search country..." />
+                                                    <CommandEmpty>
+                                                        No country found.
+                                                    </CommandEmpty>
+                                                    <CommandList
+                                                        className="max-h-[320px] overflow-auto overscroll-contain sm:max-h-[380px]"
+                                                        onWheelCapture={(
+                                                            event,
+                                                        ) => {
+                                                            event.preventDefault();
+                                                            event.stopPropagation();
+                                                            event.currentTarget.scrollTop +=
+                                                                event.deltaY;
+                                                        }}
+                                                    >
+                                                        <CommandGroup heading="ASEAN Countries">
+                                                            {groupedCountries.asean.map(
+                                                                (country) => (
+                                                                    <CommandItem
+                                                                        key={
+                                                                            country.id
+                                                                        }
+                                                                        value={`${country.name} ${country.code}`}
+                                                                        onSelect={() => {
+                                                                            asemme10DelegationForm.setData(
+                                                                                {
+                                                                                    ...asemme10DelegationForm.data,
+                                                                                    country_id:
+                                                                                        String(
+                                                                                            country.id,
+                                                                                        ),
+                                                                                    delegation:
+                                                                                        {
+                                                                                            ...asemme10DelegationForm
+                                                                                                .data
+                                                                                                .delegation,
+                                                                                            country:
+                                                                                                country.name,
+                                                                                        },
+                                                                                },
+                                                                            );
+                                                                            setAsemme10CountryOpen(
+                                                                                false,
+                                                                            );
+                                                                        }}
+                                                                        className="gap-2"
+                                                                    >
+                                                                        <FlagThumb
+                                                                            country={
+                                                                                country
+                                                                            }
+                                                                            size={
+                                                                                24
+                                                                            }
+                                                                        />
+                                                                        <span className="truncate">
+                                                                            {
+                                                                                country.name
+                                                                            }
+                                                                        </span>
+                                                                        <Check
+                                                                            className={cn(
+                                                                                'ml-auto h-4 w-4',
+                                                                                asemme10DelegationForm
+                                                                                    .data
+                                                                                    .country_id ===
+                                                                                    String(
+                                                                                        country.id,
+                                                                                    )
+                                                                                    ? 'opacity-100'
+                                                                                    : 'opacity-0',
+                                                                            )}
+                                                                        />
+                                                                    </CommandItem>
+                                                                ),
+                                                            )}
+                                                        </CommandGroup>
+                                                        {groupedCountries
+                                                            .nonAsean.length >
+                                                        0 ? (
+                                                            <CommandGroup heading="Non-ASEAN Countries">
+                                                                {groupedCountries.nonAsean.map(
+                                                                    (
+                                                                        country,
+                                                                    ) => (
+                                                                        <CommandItem
+                                                                            key={
+                                                                                country.id
+                                                                            }
+                                                                            value={`${country.name} ${country.code}`}
+                                                                            onSelect={() => {
+                                                                                asemme10DelegationForm.setData(
+                                                                                    {
+                                                                                        ...asemme10DelegationForm.data,
+                                                                                        country_id:
+                                                                                            String(
+                                                                                                country.id,
+                                                                                            ),
+                                                                                        delegation:
+                                                                                            {
+                                                                                                ...asemme10DelegationForm
+                                                                                                    .data
+                                                                                                    .delegation,
+                                                                                                country:
+                                                                                                    country.name,
+                                                                                            },
+                                                                                    },
+                                                                                );
+                                                                                setAsemme10CountryOpen(
+                                                                                    false,
+                                                                                );
+                                                                            }}
+                                                                            className="gap-2"
+                                                                        >
+                                                                            <FlagThumb
+                                                                                country={
+                                                                                    country
+                                                                                }
+                                                                                size={
+                                                                                    24
+                                                                                }
+                                                                            />
+                                                                            <span className="truncate">
+                                                                                {
+                                                                                    country.name
+                                                                                }
+                                                                            </span>
+                                                                            <Check
+                                                                                className={cn(
+                                                                                    'ml-auto h-4 w-4',
+                                                                                    asemme10DelegationForm
+                                                                                        .data
+                                                                                        .country_id ===
+                                                                                        String(
+                                                                                            country.id,
+                                                                                        )
+                                                                                        ? 'opacity-100'
+                                                                                        : 'opacity-0',
+                                                                                )}
+                                                                            />
+                                                                        </CommandItem>
+                                                                    ),
+                                                                )}
+                                                            </CommandGroup>
+                                                        ) : null}
+                                                    </CommandList>
+                                                </Command>
+                                            </PopoverContent>
+                                        </Popover>
                                         {asemme10DelegationError(
                                             'country_id',
                                         ) ? (
