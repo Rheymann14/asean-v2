@@ -94,6 +94,11 @@ class ParticipantController extends Controller
             : false;
 
         if ($usesAsemme10RegistrationData) {
+            $latestAttendeeIds = EventRegistrationAttendee::query()
+                ->selectRaw('MAX(id)')
+                ->where('programme_id', $selectedProgramme->id)
+                ->groupBy('user_id');
+
             $participantPaginator = EventRegistrationAttendee::query()
                 ->with([
                     'submission.country',
@@ -102,6 +107,7 @@ class ParticipantController extends Controller
                     'user.joinedProgrammes:id,title',
                 ])
                 ->where('programme_id', $selectedProgramme->id)
+                ->whereIn('id', $latestAttendeeIds)
                 ->when($filters['search'] !== '', function ($query) use ($filters) {
                     $search = $filters['search'];
 

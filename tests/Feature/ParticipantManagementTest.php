@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\Country;
+use App\Models\EventRegistrationAttendee;
+use App\Models\EventRegistrationSubmission;
 use App\Models\Programme;
 use App\Models\RegistrationField;
 use App\Models\User;
@@ -145,6 +147,83 @@ test('participant index defaults to active registration event when no event filt
             ->component('participant')
             ->where('filters.programme_id', (string) $registrationProgramme->id)
             ->where('participantPagination.total', 1)
+        );
+});
+
+test('participant index shows one ASEMME10 row per participant', function () {
+    $admin = adminUser();
+    [$country, $participantType] = participantFixture();
+
+    $owner = User::factory()->create();
+    $programme = Programme::query()->create([
+        'user_id' => $owner->id,
+        'tag' => 'ASEMME10',
+        'title' => '10th Asia-Europe Meeting of Ministers for Education (ASEMME10)',
+        'description' => 'ASEMME10 registration',
+        'location' => 'Manila',
+        'starts_at' => now()->addMonth(),
+        'ends_at' => now()->addMonth()->addDays(2),
+        'is_active' => true,
+    ]);
+
+    $participant = User::factory()->create([
+        'name' => 'Rheymann Cuartocruz',
+        'email' => 'rheyman101@gmail.com',
+        'country_id' => $country->id,
+        'user_type_id' => $participantType->id,
+    ]);
+    $participant->joinedProgrammes()->attach($programme->id);
+
+    $oldSubmission = EventRegistrationSubmission::query()->create([
+        'programme_id' => $programme->id,
+        'country_id' => $country->id,
+        'registration_type' => 'Country Delegation',
+        'focal_name' => 'CHED LO',
+        'focal_email' => 'focal@example.test',
+        'consents' => [],
+        'delegation_details' => [],
+        'status' => 'submitted',
+        'submitted_at' => now()->subDay(),
+    ]);
+    EventRegistrationAttendee::query()->create([
+        'submission_id' => $oldSubmission->id,
+        'programme_id' => $programme->id,
+        'user_id' => $participant->id,
+        'role' => 'head',
+        'given_name' => 'Old',
+        'family_name' => 'Name',
+        'email' => $participant->email,
+    ]);
+
+    $latestSubmission = EventRegistrationSubmission::query()->create([
+        'programme_id' => $programme->id,
+        'country_id' => $country->id,
+        'registration_type' => 'ASEAN Secretariat',
+        'focal_name' => 'CHED LO',
+        'focal_email' => 'focal@example.test',
+        'consents' => [],
+        'delegation_details' => [],
+        'status' => 'submitted',
+        'submitted_at' => now(),
+    ]);
+    EventRegistrationAttendee::query()->create([
+        'submission_id' => $latestSubmission->id,
+        'programme_id' => $programme->id,
+        'user_id' => $participant->id,
+        'role' => 'head',
+        'given_name' => 'Latest',
+        'family_name' => 'Name',
+        'email' => $participant->email,
+    ]);
+
+    $this->actingAs($admin)
+        ->get(route('participant', ['programme_id' => $programme->id, 'per_page' => 10]))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('participant')
+            ->where('participantPagination.total', 1)
+            ->where('participants.0.full_name', 'Latest Name')
+            ->where('participants.0.asemme10_registration.registration_type', 'ASEAN Secretariat')
         );
 });
 

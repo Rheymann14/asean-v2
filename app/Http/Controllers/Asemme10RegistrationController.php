@@ -106,6 +106,25 @@ class Asemme10RegistrationController extends Controller
             ]);
         }
 
+        foreach ($attendees as $index => $attendee) {
+            $email = Str::lower(trim((string) ($attendee['email'] ?? '')));
+
+            if ($email === '') {
+                continue;
+            }
+
+            $alreadyJoined = User::query()
+                ->whereRaw('LOWER(email) = ?', [$email])
+                ->whereHas('joinedProgrammes', fn ($query) => $query->whereKey($programme->id))
+                ->exists();
+
+            if ($alreadyJoined) {
+                throw ValidationException::withMessages([
+                    "attendees.{$index}.email" => 'This email is already registered for the selected event.',
+                ]);
+            }
+        }
+
         $created = DB::transaction(function () use ($request, $validated, $programme, $attendees) {
             $submission = EventRegistrationSubmission::query()->create([
                 'programme_id' => $programme->id,
@@ -162,6 +181,9 @@ class Asemme10RegistrationController extends Controller
                     'display_id' => $user->display_id,
                     'qr_payload' => $user->qr_payload,
                     'role' => $attendee['role'],
+                    'country_code' => $user->country?->code,
+                    'country_name' => $user->country?->name,
+                    'country_flag_url' => $user->country?->flag_url,
                     'virtual_id_email_sent' => $this->canEmailAttendee($attendee, $user),
                 ];
             }

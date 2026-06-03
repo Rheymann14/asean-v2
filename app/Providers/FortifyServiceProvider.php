@@ -117,7 +117,7 @@ class FortifyServiceProvider extends ServiceProvider
                 public function toResponse($request)
                 {
                     $participant = $request->user();
-                    $participant?->loadMissing('joinedProgrammes');
+                    $participant?->loadMissing(['country', 'joinedProgrammes']);
                     $requestedProgrammeIds = collect($request->input('programme_ids', []))
                         ->map(fn ($id) => (int) $id)
                         ->filter()
@@ -137,6 +137,9 @@ class FortifyServiceProvider extends ServiceProvider
                             'display_id' => $participant->display_id,
                             'qr_payload' => $participant->qr_payload,
                             'event_title' => $registeredEvent?->title,
+                            'country_code' => $participant->country?->code,
+                            'country_name' => $participant->country?->name,
+                            'country_flag_url' => $participant->country?->flag_url,
                         ]
                         : null;
 

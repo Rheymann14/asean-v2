@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\SendWelcomeNotifications;
 use App\Mail\ParticipantWelcomeMail;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
@@ -12,6 +13,11 @@ use Throwable;
 class WelcomeNotificationService
 {
     public function dispatch(User $user): void
+    {
+        SendWelcomeNotifications::dispatchAfterResponse($user->id);
+    }
+
+    public function sendNow(User $user): void
     {
         $this->sendWelcomeEmail($user);
         rescue(fn () => app(SemaphoreSms::class)->sendWelcome($user), report: true);

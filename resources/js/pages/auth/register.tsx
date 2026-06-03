@@ -49,6 +49,7 @@ import {
     EyeOff,
     ImagePlus,
     Loader2,
+    QrCode,
     Sparkles,
 } from 'lucide-react';
 
@@ -112,6 +113,9 @@ type RegisteredParticipant = {
     display_id: string;
     qr_payload: string;
     event_title?: string | null;
+    country_code?: string | null;
+    country_name?: string | null;
+    country_flag_url?: string | null;
 };
 
 type Asemme10Submission = {
@@ -124,8 +128,22 @@ type Asemme10Submission = {
         display_id: string;
         qr_payload: string;
         role?: string | null;
+        country_code?: string | null;
+        country_name?: string | null;
+        country_flag_url?: string | null;
         virtual_id_email_sent?: boolean;
     }[];
+};
+
+type VirtualIdParticipant = {
+    name: string;
+    email?: string | null;
+    display_id: string;
+    qr_payload: string;
+    event_title?: string | null;
+    country_code?: string | null;
+    country_name?: string | null;
+    country_flag_url?: string | null;
 };
 
 const FOOD_RESTRICTION_OPTIONS = [
@@ -245,7 +263,8 @@ function registrationTypeToPrefix(value: string) {
     const normalized = value.trim().toLowerCase();
 
     if (normalized === 'country delegation') return 'country_delegation';
-    if (normalized === 'stakeholder delegation') return 'stakeholder_delegation';
+    if (normalized === 'stakeholder delegation')
+        return 'stakeholder_delegation';
     if (normalized === 'asean secretariat') return 'asean_secretariat';
     if (normalized === 'european union') return 'european_union';
     if (normalized === 'other' || normalized === 'single participant') {
@@ -269,7 +288,8 @@ function isAsemme10Programme(programme: ProgrammeOption | null) {
 function fieldBranchPrefix(fieldKey: string) {
     return (
         ASEMME_BRANCH_PREFIXES.find(
-            (prefix) => fieldKey === prefix || fieldKey.startsWith(`${prefix}_`),
+            (prefix) =>
+                fieldKey === prefix || fieldKey.startsWith(`${prefix}_`),
         ) ?? ''
     );
 }
@@ -306,7 +326,10 @@ function isRegistrationFieldVisible(
         return false;
     }
 
-    return registrationTypeToPrefix(String(selectedRegistrationType ?? '')) === prefix;
+    return (
+        registrationTypeToPrefix(String(selectedRegistrationType ?? '')) ===
+        prefix
+    );
 }
 
 function wrapCanvasText(
@@ -335,6 +358,94 @@ function wrapCanvasText(
     if (line) {
         ctx.fillText(line, x, currentY);
     }
+}
+
+function drawRoundedRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number,
+) {
+    const safeRadius = Math.min(radius, width / 2, height / 2);
+
+    ctx.beginPath();
+    ctx.moveTo(x + safeRadius, y);
+    ctx.lineTo(x + width - safeRadius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+    ctx.lineTo(x + width, y + height - safeRadius);
+    ctx.quadraticCurveTo(
+        x + width,
+        y + height,
+        x + width - safeRadius,
+        y + height,
+    );
+    ctx.lineTo(x + safeRadius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+    ctx.lineTo(x, y + safeRadius);
+    ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+    ctx.closePath();
+}
+
+function loadCanvasImage(
+    src?: string | null,
+): Promise<HTMLImageElement | null> {
+    if (!src) {
+        return Promise.resolve(null);
+    }
+
+    return new Promise((resolve) => {
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.onload = () => resolve(image);
+        image.onerror = () => resolve(null);
+        image.src = src;
+    });
+}
+
+function drawContainedCanvasImage(
+    ctx: CanvasRenderingContext2D,
+    image: HTMLImageElement,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+) {
+    const imageWidth = image.naturalWidth || image.width;
+    const imageHeight = image.naturalHeight || image.height;
+
+    if (!imageWidth || !imageHeight) {
+        return;
+    }
+
+    const scale = Math.min(width / imageWidth, height / imageHeight);
+    const drawWidth = imageWidth * scale;
+    const drawHeight = imageHeight * scale;
+
+    ctx.drawImage(
+        image,
+        x + (width - drawWidth) / 2,
+        y + (height - drawHeight) / 2,
+        drawWidth,
+        drawHeight,
+    );
+}
+
+function fallbackCountryFlagUrl(
+    participant?: VirtualIdParticipant | null,
+): string | null {
+    if (!participant) {
+        return null;
+    }
+
+    if (participant.country_flag_url) {
+        return participant.country_flag_url;
+    }
+
+    const code = participant.country_code?.toLowerCase();
+
+    return code ? `/asean/${code}.jpg` : null;
 }
 
 function getCenteredCircleCrop(width: number, height: number): Crop {
@@ -464,6 +575,24 @@ export default function Register({
     const [successQrDataUrl, setSuccessQrDataUrl] = React.useState<
         string | null
     >(null);
+    const virtualIdParticipant = React.useMemo<VirtualIdParticipant | null>(
+        () =>
+            registeredParticipant ??
+            asemme10Submission?.participants[0] ??
+            null,
+        [asemme10Submission?.participants, registeredParticipant],
+    );
+    const virtualIdEventTitle =
+        virtualIdParticipant?.event_title ??
+        registeredParticipant?.event_title ??
+        asemme10Submission?.event_title ??
+        activeProgramme?.title ??
+        'ASEAN Philippines 2026';
+    const virtualIdCountryCode =
+        virtualIdParticipant?.country_code?.toUpperCase() ?? 'PHL';
+    const virtualIdCountryName =
+        virtualIdParticipant?.country_name ?? 'Philippines';
+    const virtualIdFlagUrl = fallbackCountryFlagUrl(virtualIdParticipant);
     const [preferredImagePreviewUrl, setPreferredImagePreviewUrl] =
         React.useState<string | null>(null);
     const [preferredImageError, setPreferredImageError] =
@@ -849,8 +978,7 @@ export default function Register({
     );
 
     const dynamicOtherKey = React.useCallback(
-        (programmeId: number, fieldId: number) =>
-            `${programmeId}-${fieldId}`,
+        (programmeId: number, fieldId: number) => `${programmeId}-${fieldId}`,
         [],
     );
 
@@ -991,6 +1119,13 @@ export default function Register({
             const nextErrors: Record<string, string> = {};
             const valueOf = (name: string) =>
                 String(formData.get(name) ?? '').trim();
+            const formValueOf = (name: string) => {
+                const values = formData
+                    .getAll(name)
+                    .map((value) => String(value ?? '').trim());
+
+                return values.findLast((value) => value !== '') ?? '';
+            };
             const requireValue = (name: string, label: string) => {
                 if (!valueOf(name)) {
                     nextErrors[name] = `${label} is required.`;
@@ -1017,6 +1152,16 @@ export default function Register({
                     );
                     const dynamicStringFor = (key: string) => {
                         const field = fieldByKey.get(key);
+                        const formValue = field
+                            ? formValueOf(
+                                  `registration_responses[${programme.id}][${field.id}]`,
+                              )
+                            : '';
+
+                        if (formValue) {
+                            return formValue;
+                        }
+
                         const value = field
                             ? getDynamicValue(programme.id, field.id)
                             : '';
@@ -1073,10 +1218,7 @@ export default function Register({
 
                         if (
                             selectedOther(field, value) &&
-                            !getDynamicOtherValue(
-                                programme.id,
-                                field.id,
-                            ).trim()
+                            !getDynamicOtherValue(programme.id, field.id).trim()
                         ) {
                             nextErrors[
                                 dynamicOtherErrorKey(programme.id, field.id)
@@ -1084,9 +1226,8 @@ export default function Register({
                         }
                     });
 
-                    const registrationType = dynamicStringFor(
-                        'registration_type',
-                    );
+                    const registrationType =
+                        dynamicStringFor('registration_type');
                     const prefix = registrationTypeToPrefix(registrationType);
 
                     if (prefix === 'single_participant') {
@@ -1117,6 +1258,32 @@ export default function Register({
                                 : `${prefix}_email`,
                             'Head email',
                         );
+
+                        for (let index = 1; index <= 3; index += 1) {
+                            const delegatePrefix = `${prefix}_delegate_${index}`;
+                            const givenName = dynamicStringFor(
+                                `${delegatePrefix}_given_name`,
+                            );
+                            const familyName = dynamicStringFor(
+                                `${delegatePrefix}_family_name`,
+                            );
+                            const email = dynamicStringFor(
+                                `${delegatePrefix}_email`,
+                            );
+
+                            if (!givenName && !familyName && !email) {
+                                continue;
+                            }
+
+                            requireDynamicField(
+                                `${delegatePrefix}_given_name`,
+                                `Delegate ${index} given name`,
+                            );
+                            requireDynamicField(
+                                `${delegatePrefix}_family_name`,
+                                `Delegate ${index} family name`,
+                            );
+                        }
                     }
                 });
 
@@ -1316,9 +1483,7 @@ export default function Register({
                     ? getDynamicValue(activeProgramme.id, field.id)
                     : '';
 
-                return Array.isArray(value)
-                    ? ''
-                    : String(value ?? '').trim();
+                return Array.isArray(value) ? '' : String(value ?? '').trim();
             };
             const prefix = registrationTypeToPrefix(
                 stringFor('registration_type'),
@@ -1329,6 +1494,10 @@ export default function Register({
                     : `${prefix}_email`;
 
             const directMap: Record<string, string> = {
+                email:
+                    prefix === 'single_participant'
+                        ? 'single_participant_email'
+                        : headEmailKey,
                 registration_type: 'registration_type',
                 'consents.data_collection': 'data_collection_confirmation',
                 'consents.data_storage': 'data_storage_consent',
@@ -1408,11 +1577,55 @@ export default function Register({
             }
 
             if (serverKey === 'attendees') {
+                if (prefix === 'single_participant') {
+                    return (
+                        dynamicKeyFor(
+                            !stringFor('single_participant_given_name')
+                                ? 'single_participant_given_name'
+                                : 'single_participant_family_name',
+                        ) ?? serverKey
+                    );
+                }
+
+                const headGivenKey = `${prefix}_head_given_name`;
+                const headFamilyKey = `${prefix}_head_family_name`;
+
+                if (!stringFor(headGivenKey)) {
+                    return dynamicKeyFor(headGivenKey) ?? serverKey;
+                }
+
+                if (!stringFor(headFamilyKey)) {
+                    return dynamicKeyFor(headFamilyKey) ?? serverKey;
+                }
+
+                for (let index = 1; index <= 3; index += 1) {
+                    const delegatePrefix = `${prefix}_delegate_${index}`;
+                    const givenKey = `${delegatePrefix}_given_name`;
+                    const familyKey = `${delegatePrefix}_family_name`;
+                    const emailKey = `${delegatePrefix}_email`;
+                    const hasPartialAttendee =
+                        stringFor(givenKey) ||
+                        stringFor(familyKey) ||
+                        stringFor(emailKey);
+
+                    if (!hasPartialAttendee) {
+                        continue;
+                    }
+
+                    if (!stringFor(givenKey)) {
+                        return dynamicKeyFor(givenKey) ?? serverKey;
+                    }
+
+                    if (!stringFor(familyKey)) {
+                        return dynamicKeyFor(familyKey) ?? serverKey;
+                    }
+                }
+
                 return (
                     dynamicKeyFor(
-                        prefix === 'single_participant'
-                            ? 'single_participant_given_name'
-                            : `${prefix}_head_given_name`,
+                        prefix
+                            ? `${prefix}_head_given_name`
+                            : 'registration_type',
                     ) ?? serverKey
                 );
             }
@@ -1463,14 +1676,13 @@ export default function Register({
 
             target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-            const focusTarget =
-                target.matches(
-                    'input:not([type="hidden"]), textarea, button, [tabindex]:not([tabindex="-1"])',
-                )
-                    ? target
-                    : target.querySelector<HTMLElement>(
-                          'input:not([type="hidden"]), textarea, button, [tabindex]:not([tabindex="-1"])',
-                      );
+            const focusTarget = target.matches(
+                'input:not([type="hidden"]), textarea, button, [tabindex]:not([tabindex="-1"])',
+            )
+                ? target
+                : target.querySelector<HTMLElement>(
+                      'input:not([type="hidden"]), textarea, button, [tabindex]:not([tabindex="-1"])',
+                  );
 
             focusTarget?.focus({ preventScroll: true });
         }, 80);
@@ -1623,7 +1835,7 @@ export default function Register({
 
     React.useEffect(() => {
         let active = true;
-        const value = registeredParticipant?.qr_payload?.trim();
+        const value = virtualIdParticipant?.qr_payload?.trim();
 
         if (!value) {
             setSuccessQrDataUrl(null);
@@ -1649,7 +1861,7 @@ export default function Register({
         return () => {
             active = false;
         };
-    }, [registeredParticipant?.qr_payload]);
+    }, [virtualIdParticipant?.qr_payload]);
 
     const inputClass =
         'h-11 rounded-xl border-slate-200 bg-white shadow-[inset_0_1px_2px_rgba(2,6,23,0.06)] ' +
@@ -1673,87 +1885,176 @@ export default function Register({
     };
 
     const downloadVirtualId = React.useCallback(async () => {
-        if (!registeredParticipant || !successQrDataUrl) return;
+        if (!virtualIdParticipant || !successQrDataUrl) return;
 
         const canvas = document.createElement('canvas');
         canvas.width = 1200;
-        canvas.height = 760;
+        canvas.height = 740;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const qrImage = await new Promise<HTMLImageElement>(
-            (resolve, reject) => {
-                const image = new Image();
-                image.onload = () => resolve(image);
-                image.onerror = reject;
-                image.src = successQrDataUrl;
-            },
-        );
+        const [qrImage, aseanLogo, bagongLogo, flagImage, backgroundImage] =
+            await Promise.all([
+                loadCanvasImage(successQrDataUrl),
+                loadCanvasImage('/img/asean_logo.png'),
+                loadCanvasImage('/img/bagong_pilipinas.png'),
+                loadCanvasImage(virtualIdFlagUrl),
+                loadCanvasImage('/img/bg2.png'),
+            ]);
 
-        ctx.fillStyle = '#ffffff';
+        if (!qrImage) return;
+
+        ctx.fillStyle = '#eaf6ff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#0033A0';
-        ctx.fillRect(0, 0, canvas.width, 132);
-        ctx.fillStyle = '#FCD116';
-        ctx.fillRect(0, 132, canvas.width, 12);
 
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '700 44px Arial, sans-serif';
-        ctx.fillText('VIRTUAL PARTICIPANT ID', 56, 82);
+        if (backgroundImage) {
+            ctx.save();
+            ctx.globalAlpha = 0.24;
+            ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+        }
 
-        ctx.fillStyle = '#475569';
-        ctx.font = '600 24px Arial, sans-serif';
-        ctx.fillText(
-            registeredParticipant.event_title || 'Registration Event',
-            56,
-            190,
+        const fade = ctx.createLinearGradient(
+            0,
+            0,
+            canvas.width,
+            canvas.height,
         );
+        fade.addColorStop(0, 'rgba(255,255,255,0.86)');
+        fade.addColorStop(0.52, 'rgba(220,241,255,0.72)');
+        fade.addColorStop(1, 'rgba(255,255,255,0.9)');
+        ctx.fillStyle = fade;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '700 54px Arial, sans-serif';
-        wrapCanvasText(ctx, registeredParticipant.name, 56, 288, 680, 62);
+        ctx.save();
+        drawRoundedRect(ctx, 22, 20, canvas.width - 44, canvas.height - 40, 46);
+        ctx.clip();
 
-        ctx.fillStyle = '#475569';
-        ctx.font = '400 28px Arial, sans-serif';
-        ctx.fillText(registeredParticipant.email, 56, 430);
+        if (aseanLogo) {
+            drawContainedCanvasImage(ctx, aseanLogo, 56, 52, 62, 62);
+        }
 
-        ctx.fillStyle = '#0033A0';
-        ctx.font = '700 36px Arial, sans-serif';
-        ctx.fillText(registeredParticipant.display_id, 56, 520);
-
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(790, 190, 320, 320);
-        ctx.drawImage(qrImage, 790, 190, 320, 320);
+        if (bagongLogo) {
+            drawContainedCanvasImage(ctx, bagongLogo, 134, 54, 78, 54);
+        }
 
         ctx.fillStyle = '#334155';
-        ctx.font = '600 22px Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Scan for event verification', 950, 556);
-        ctx.textAlign = 'left';
-
-        ctx.fillStyle = '#e2e8f0';
-        ctx.fillRect(56, 640, 1088, 1);
+        ctx.font = '700 25px Arial, sans-serif';
+        ctx.fillText('ASEAN Philippines 2026', 240, 70);
         ctx.fillStyle = '#64748b';
         ctx.font = '400 20px Arial, sans-serif';
+        ctx.fillText(virtualIdEventTitle, 240, 101);
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = '700 24px Arial, sans-serif';
+        ctx.fillText('PARTICIPANT', 56, 176);
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '700 44px Arial, sans-serif';
+        wrapCanvasText(ctx, virtualIdParticipant.name, 56, 222, 560, 48);
+
+        ctx.save();
+        drawRoundedRect(ctx, 56, 292, 134, 134, 28);
+        ctx.clip();
+        ctx.fillStyle = '#dbeafe';
+        ctx.fillRect(56, 292, 134, 134);
+        if (flagImage) {
+            ctx.drawImage(flagImage, 56, 292, 134, 134);
+        }
+        ctx.restore();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '700 34px Arial, sans-serif';
+        ctx.fillText(virtualIdCountryName, 214, 342, 420);
+        ctx.fillStyle = '#64748b';
+        ctx.font = '500 24px Arial, sans-serif';
+        ctx.fillText(virtualIdCountryCode, 214, 382);
+
+        ctx.fillStyle = '#475569';
+        ctx.font = '700 24px Arial, sans-serif';
+        ctx.fillText('PARTICIPANT ID', 56, 490);
+
+        drawRoundedRect(ctx, 56, 512, 360, 60, 30);
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(148,163,184,0.55)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '700 25px Arial, sans-serif';
+        ctx.fillText(virtualIdParticipant.display_id, 86, 552);
+
+        drawRoundedRect(ctx, 724, 148, 420, 520, 42);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#334155';
+        ctx.font = '700 18px Arial, sans-serif';
+        ctx.fillText('QR Code', 858, 211);
+        ctx.drawImage(qrImage, 778, 244, 314, 314);
+
+        ctx.fillStyle = '#334155';
+        ctx.font = '700 18px Arial, sans-serif';
+        ctx.textAlign = 'center';
         ctx.fillText(
-            'Please present this virtual ID at event check-in.',
-            56,
-            690,
+            `${virtualIdCountryCode} - ${virtualIdParticipant.name}`,
+            934,
+            608,
+            340,
         );
+        ctx.fillStyle = '#64748b';
+        ctx.font = '500 15px Arial, sans-serif';
+        ctx.fillText(virtualIdParticipant.display_id, 934, 645);
+        ctx.textAlign = 'left';
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = '500 18px Arial, sans-serif';
+        ctx.fillText('Scan QR for attendance verification.', 56, 660);
+
+        ctx.restore();
 
         const link = document.createElement('a');
-        link.download = `${registeredParticipant.display_id || 'virtual-id'}.jpg`;
+        link.download = `${virtualIdParticipant.display_id || 'virtual-id'}.jpg`;
         link.href = canvas.toDataURL('image/jpeg', 0.94);
         link.click();
-    }, [registeredParticipant, successQrDataUrl]);
+    }, [
+        successQrDataUrl,
+        virtualIdCountryCode,
+        virtualIdCountryName,
+        virtualIdEventTitle,
+        virtualIdFlagUrl,
+        virtualIdParticipant,
+    ]);
 
     const submitAsemme10Registration = React.useCallback(() => {
         if (!activeProgramme) return;
 
+        const form = document.getElementById(
+            'register-form',
+        ) as HTMLFormElement | null;
+        const formData = form ? new FormData(form) : new FormData();
         const fields = activeProgramme.registration_fields ?? [];
-        const fieldByKey = new Map(fields.map((field) => [field.field_key, field]));
+        const fieldByKey = new Map(
+            fields.map((field) => [field.field_key, field]),
+        );
         const valueFor = (key: string): string | string[] => {
             const field = fieldByKey.get(key);
+
+            if (field) {
+                const formValues = formData.getAll(
+                    `registration_responses[${activeProgramme.id}][${field.id}]`,
+                );
+                const latestFormValue = formValues
+                    .map((value) => String(value ?? '').trim())
+                    .findLast((value) => value !== '');
+
+                if (latestFormValue) {
+                    return latestFormValue;
+                }
+            }
 
             return field ? getDynamicValue(activeProgramme.id, field.id) : '';
         };
@@ -1799,31 +2100,39 @@ export default function Register({
         const headEmailKey =
             prefix === 'country_delegation' ? 'head_email' : 'email';
 
-        const attendee = (role: string, keyPrefix: string) => ({
-            role,
-            title: stringFor(`${keyPrefix}_title`) || null,
-            title_other: otherFor(`${keyPrefix}_title`) || null,
-            given_name: stringFor(`${keyPrefix}_given_name`),
-            family_name: stringFor(`${keyPrefix}_family_name`),
-            badge_name: stringFor(`${keyPrefix}_badge_name`),
-            organization_name:
-                stringFor(`${keyPrefix}_ministry_or_organisation`) ||
-                stringFor(`${keyPrefix}_organisation`) ||
-                stringFor(`${keyPrefix}_organization_name`) ||
-                stringFor(`${keyPrefix}_head_ministry_name`) ||
-                stringFor(`${prefix}_${headOrganisationKey}`),
-            position_title:
-                stringFor(`${keyPrefix}_job_title`) ||
-                stringFor(`${keyPrefix}_position`) ||
-                stringFor(`${prefix}_position`),
-            email:
-                stringFor(`${keyPrefix}_email`) ||
-                stringFor(`${prefix}_${headEmailKey}`),
-            dietary_requirements: stringFor(`${prefix}_dietary_requirements`),
-            mobility_or_special_needs: stringFor(
-                `${prefix}_mobility_or_special_needs`,
-            ),
-        });
+        const attendee = (role: string, keyPrefix: string) => {
+            const isHead = role === 'head';
+
+            return {
+                role,
+                title: stringFor(`${keyPrefix}_title`) || null,
+                title_other: otherFor(`${keyPrefix}_title`) || null,
+                given_name: stringFor(`${keyPrefix}_given_name`),
+                family_name: stringFor(`${keyPrefix}_family_name`),
+                badge_name: stringFor(`${keyPrefix}_badge_name`),
+                organization_name:
+                    stringFor(`${keyPrefix}_ministry_or_organisation`) ||
+                    stringFor(`${keyPrefix}_organisation`) ||
+                    stringFor(`${keyPrefix}_organization_name`) ||
+                    stringFor(`${keyPrefix}_head_ministry_name`) ||
+                    (isHead
+                        ? stringFor(`${prefix}_${headOrganisationKey}`)
+                        : ''),
+                position_title:
+                    stringFor(`${keyPrefix}_job_title`) ||
+                    stringFor(`${keyPrefix}_position`) ||
+                    (isHead ? stringFor(`${prefix}_position`) : ''),
+                email:
+                    stringFor(`${keyPrefix}_email`) ||
+                    (isHead ? stringFor(`${prefix}_${headEmailKey}`) : ''),
+                dietary_requirements: stringFor(
+                    `${prefix}_dietary_requirements`,
+                ),
+                mobility_or_special_needs: stringFor(
+                    `${prefix}_mobility_or_special_needs`,
+                ),
+            };
+        };
 
         const attendees = [];
 
@@ -1852,10 +2161,7 @@ export default function Register({
 
             for (let index = 1; index <= 3; index += 1) {
                 const delegatePrefix = `${prefix}_delegate_${index}`;
-                const delegate = attendee(
-                    `delegate_${index}`,
-                    delegatePrefix,
-                );
+                const delegate = attendee(`delegate_${index}`, delegatePrefix);
 
                 if (
                     delegate.given_name ||
@@ -1865,6 +2171,51 @@ export default function Register({
                     attendees.push(delegate);
                 }
             }
+        }
+
+        const attendeeErrorKey = (
+            role: string,
+            fieldSuffix: 'given_name' | 'family_name',
+        ) => {
+            const fieldKey =
+                prefix === 'single_participant'
+                    ? `single_participant_${fieldSuffix}`
+                    : role === 'head'
+                      ? `${prefix}_head_${fieldSuffix}`
+                      : `${prefix}_${role}_${fieldSuffix}`;
+            const field = fieldByKey.get(fieldKey);
+
+            return field
+                ? dynamicErrorKey(activeProgramme.id, field.id)
+                : 'attendees';
+        };
+        const attendeeErrors = attendees.reduce<Record<string, string>>(
+            (errors, participant) => {
+                const roleLabel =
+                    participant.role === 'head'
+                        ? 'Head'
+                        : participant.role.startsWith('delegate_')
+                          ? `Delegate ${participant.role.replace('delegate_', '')}`
+                          : 'Participant';
+
+                if (!participant.given_name) {
+                    errors[attendeeErrorKey(participant.role, 'given_name')] =
+                        `${roleLabel} given name is required.`;
+                }
+
+                if (!participant.family_name) {
+                    errors[attendeeErrorKey(participant.role, 'family_name')] =
+                        `${roleLabel} family name is required.`;
+                }
+
+                return errors;
+            },
+            {},
+        );
+
+        if (Object.keys(attendeeErrors).length > 0) {
+            showValidationFeedback(attendeeErrors);
+            return;
         }
 
         const focalAttendee = attendees[0] ?? {
@@ -1887,10 +2238,7 @@ export default function Register({
                 country_id: countryId,
                 registration_type: registrationType,
                 focal: {
-                    name: [
-                        focalAttendee.given_name,
-                        focalAttendee.family_name,
-                    ]
+                    name: [focalAttendee.given_name, focalAttendee.family_name]
                         .filter(Boolean)
                         .join(' '),
                     email: focalAttendee.email,
@@ -1901,9 +2249,7 @@ export default function Register({
                     position: focalAttendee.position_title,
                 },
                 consents: {
-                    data_collection: stringFor(
-                        'data_collection_confirmation',
-                    )
+                    data_collection: stringFor('data_collection_confirmation')
                         ? 'yes'
                         : '',
                     data_storage: stringFor('data_storage_consent')
@@ -1958,6 +2304,7 @@ export default function Register({
         activeProgramme,
         country,
         countryOther,
+        dynamicErrorKey,
         getDynamicOtherValue,
         getDynamicValue,
         selectedCountry?.name,
@@ -2035,6 +2382,11 @@ export default function Register({
                         | HTMLInputElement
                         | HTMLSelectElement
                         | HTMLTextAreaElement;
+
+                    if (target?.name?.startsWith('registration_responses[')) {
+                        return;
+                    }
+
                     markDirty(target?.name);
                     clearClientError(target?.name);
                     if (target?.name) {
@@ -2293,163 +2645,103 @@ export default function Register({
                                     )}
 
                                     {!isAsemme10Registration ? (
-                                    <fieldset
-                                        data-active={currentStep === 0}
-                                        aria-hidden={currentStep !== 0}
-                                        className={cn(
-                                            'grid gap-5',
-                                            currentStep === 0 ? '' : 'hidden',
-                                        )}
-                                    >
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="country_id">
-                                                Country of Origin{' '}
-                                                <span className="text-[11px] font-semibold text-red-600">
-                                                    {' '}
-                                                    *
-                                                </span>
-                                            </Label>
-                                            <input
-                                                type="hidden"
-                                                name="country_id"
-                                                value={country}
-                                            />
+                                        <fieldset
+                                            data-active={currentStep === 0}
+                                            aria-hidden={currentStep !== 0}
+                                            className={cn(
+                                                'grid gap-5',
+                                                currentStep === 0
+                                                    ? ''
+                                                    : 'hidden',
+                                            )}
+                                        >
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="country_id">
+                                                    Country of Origin{' '}
+                                                    <span className="text-[11px] font-semibold text-red-600">
+                                                        {' '}
+                                                        *
+                                                    </span>
+                                                </Label>
+                                                <input
+                                                    type="hidden"
+                                                    name="country_id"
+                                                    value={country}
+                                                />
 
-                                            <Popover
-                                                open={countryOpen}
-                                                onOpenChange={setCountryOpen}
-                                            >
-                                                <PopoverTrigger asChild>
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        role="combobox"
-                                                        aria-expanded={
-                                                            countryOpen
-                                                        }
-                                                        className={
-                                                            comboboxTriggerClass
-                                                        }
-                                                        tabIndex={1}
-                                                    >
-                                                        <span className="flex min-w-0 items-center gap-2">
-                                                            {selectedCountry ? (
-                                                                <>
-                                                                    {selectedCountry.flag_url ? (
-                                                                        <img
-                                                                            src={
-                                                                                selectedCountry.flag_url
-                                                                            }
-                                                                            alt=""
-                                                                            className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
-                                                                            loading="lazy"
-                                                                            draggable={
-                                                                                false
-                                                                            }
-                                                                        />
-                                                                    ) : (
-                                                                        <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
-                                                                            {
-                                                                                selectedCountry.code
-                                                                            }
-                                                                        </span>
-                                                                    )}
-                                                                    <span className="truncate">
-                                                                        {
-                                                                            selectedCountry.name
-                                                                        }
-                                                                    </span>
-                                                                </>
-                                                            ) : (
-                                                                <span className="text-muted-foreground">
-                                                                    Select
-                                                                    country…
-                                                                </span>
-                                                            )}
-                                                        </span>
-                                                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                                                    </Button>
-                                                </PopoverTrigger>
-
-                                                <PopoverContent
-                                                    className="z-50 w-[--radix-popover-trigger-width] p-0"
-                                                    align="start"
+                                                <Popover
+                                                    open={countryOpen}
+                                                    onOpenChange={
+                                                        setCountryOpen
+                                                    }
                                                 >
-                                                    <Command>
-                                                        <CommandInput placeholder="Search country…" />
-                                                        <CommandEmpty>
-                                                            No country found.
-                                                        </CommandEmpty>
-
-                                                        {/* ✅ scrollable list */}
-                                                        <CommandList className="max-h-[320px] overflow-auto overscroll-contain sm:max-h-[380px]">
-                                                            <CommandGroup heading="ASEAN Countries">
-                                                                {groupedCountries.asean.map(
-                                                                    (item) => (
-                                                                        <CommandItem
-                                                                            key={
-                                                                                item.id
-                                                                            }
-                                                                            value={
-                                                                                item.name
-                                                                            }
-                                                                            onSelect={() => {
-                                                                                setCountry(
-                                                                                    String(
-                                                                                        item.id,
-                                                                                    ),
-                                                                                );
-                                                                                setCountryOpen(
-                                                                                    false,
-                                                                                );
-                                                                            }}
-                                                                            className="gap-2"
-                                                                        >
-                                                                            {item.flag_url ? (
-                                                                                <img
-                                                                                    src={
-                                                                                        item.flag_url
-                                                                                    }
-                                                                                    alt=""
-                                                                                    className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
-                                                                                    loading="lazy"
-                                                                                    draggable={
-                                                                                        false
-                                                                                    }
-                                                                                />
-                                                                            ) : (
-                                                                                <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
-                                                                                    {
-                                                                                        item.code
-                                                                                    }
-                                                                                </span>
-                                                                            )}
-                                                                            <span className="truncate">
+                                                    <PopoverTrigger asChild>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            role="combobox"
+                                                            aria-expanded={
+                                                                countryOpen
+                                                            }
+                                                            className={
+                                                                comboboxTriggerClass
+                                                            }
+                                                            tabIndex={1}
+                                                        >
+                                                            <span className="flex min-w-0 items-center gap-2">
+                                                                {selectedCountry ? (
+                                                                    <>
+                                                                        {selectedCountry.flag_url ? (
+                                                                            <img
+                                                                                src={
+                                                                                    selectedCountry.flag_url
+                                                                                }
+                                                                                alt=""
+                                                                                className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
+                                                                                loading="lazy"
+                                                                                draggable={
+                                                                                    false
+                                                                                }
+                                                                            />
+                                                                        ) : (
+                                                                            <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
                                                                                 {
-                                                                                    item.name
+                                                                                    selectedCountry.code
                                                                                 }
                                                                             </span>
-                                                                            <Check
-                                                                                className={cn(
-                                                                                    'ml-auto h-4 w-4',
-                                                                                    country ===
-                                                                                        String(
-                                                                                            item.id,
-                                                                                        )
-                                                                                        ? 'opacity-100'
-                                                                                        : 'opacity-0',
-                                                                                )}
-                                                                            />
-                                                                        </CommandItem>
-                                                                    ),
+                                                                        )}
+                                                                        <span className="truncate">
+                                                                            {
+                                                                                selectedCountry.name
+                                                                            }
+                                                                        </span>
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="text-muted-foreground">
+                                                                        Select
+                                                                        country…
+                                                                    </span>
                                                                 )}
-                                                            </CommandGroup>
+                                                            </span>
+                                                            <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                                                        </Button>
+                                                    </PopoverTrigger>
 
-                                                            {groupedCountries
-                                                                .nonAsean
-                                                                .length > 0 ? (
-                                                                <CommandGroup heading="Non-ASEAN Countries">
-                                                                    {groupedCountries.nonAsean.map(
+                                                    <PopoverContent
+                                                        className="z-50 w-[--radix-popover-trigger-width] p-0"
+                                                        align="start"
+                                                    >
+                                                        <Command>
+                                                            <CommandInput placeholder="Search country…" />
+                                                            <CommandEmpty>
+                                                                No country
+                                                                found.
+                                                            </CommandEmpty>
+
+                                                            {/* ✅ scrollable list */}
+                                                            <CommandList className="max-h-[320px] overflow-auto overscroll-contain sm:max-h-[380px]">
+                                                                <CommandGroup heading="ASEAN Countries">
+                                                                    {groupedCountries.asean.map(
                                                                         (
                                                                             item,
                                                                         ) => (
@@ -2457,7 +2749,9 @@ export default function Register({
                                                                                 key={
                                                                                     item.id
                                                                                 }
-                                                                                value={`${item.name} ${item.code}`}
+                                                                                value={
+                                                                                    item.name
+                                                                                }
                                                                                 onSelect={() => {
                                                                                     setCountry(
                                                                                         String(
@@ -2509,488 +2803,564 @@ export default function Register({
                                                                         ),
                                                                     )}
                                                                 </CommandGroup>
-                                                            ) : null}
-                                                        </CommandList>
-                                                    </Command>
-                                                </PopoverContent>
-                                            </Popover>
 
-                                            <InputError
-                                                message={
-                                                    err.country_id && !country
-                                                        ? err.country_id
-                                                        : undefined
-                                                }
-                                            />
-                                        </div>
+                                                                {groupedCountries
+                                                                    .nonAsean
+                                                                    .length >
+                                                                0 ? (
+                                                                    <CommandGroup heading="Non-ASEAN Countries">
+                                                                        {groupedCountries.nonAsean.map(
+                                                                            (
+                                                                                item,
+                                                                            ) => (
+                                                                                <CommandItem
+                                                                                    key={
+                                                                                        item.id
+                                                                                    }
+                                                                                    value={`${item.name} ${item.code}`}
+                                                                                    onSelect={() => {
+                                                                                        setCountry(
+                                                                                            String(
+                                                                                                item.id,
+                                                                                            ),
+                                                                                        );
+                                                                                        setCountryOpen(
+                                                                                            false,
+                                                                                        );
+                                                                                    }}
+                                                                                    className="gap-2"
+                                                                                >
+                                                                                    {item.flag_url ? (
+                                                                                        <img
+                                                                                            src={
+                                                                                                item.flag_url
+                                                                                            }
+                                                                                            alt=""
+                                                                                            className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
+                                                                                            loading="lazy"
+                                                                                            draggable={
+                                                                                                false
+                                                                                            }
+                                                                                        />
+                                                                                    ) : (
+                                                                                        <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
+                                                                                            {
+                                                                                                item.code
+                                                                                            }
+                                                                                        </span>
+                                                                                    )}
+                                                                                    <span className="truncate">
+                                                                                        {
+                                                                                            item.name
+                                                                                        }
+                                                                                    </span>
+                                                                                    <Check
+                                                                                        className={cn(
+                                                                                            'ml-auto h-4 w-4',
+                                                                                            country ===
+                                                                                                String(
+                                                                                                    item.id,
+                                                                                                )
+                                                                                                ? 'opacity-100'
+                                                                                                : 'opacity-0',
+                                                                                        )}
+                                                                                    />
+                                                                                </CommandItem>
+                                                                            ),
+                                                                        )}
+                                                                    </CommandGroup>
+                                                                ) : null}
+                                                            </CommandList>
+                                                        </Command>
+                                                    </PopoverContent>
+                                                </Popover>
 
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="honorific_title">
-                                                Honorific / Title{' '}
-                                                <span className="text-[11px] font-semibold text-red-600">
-                                                    {' '}
-                                                    *
-                                                </span>
-                                            </Label>
+                                                <InputError
+                                                    message={
+                                                        err.country_id &&
+                                                        !country
+                                                            ? err.country_id
+                                                            : undefined
+                                                    }
+                                                />
+                                            </div>
 
-                                            <input
-                                                type="hidden"
-                                                name="honorific_title"
-                                                value={honorificTitle}
-                                            />
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="honorific_title">
+                                                    Honorific / Title{' '}
+                                                    <span className="text-[11px] font-semibold text-red-600">
+                                                        {' '}
+                                                        *
+                                                    </span>
+                                                </Label>
 
-                                            <Popover
-                                                open={honorificOpen}
-                                                onOpenChange={setHonorificOpen}
-                                            >
-                                                <PopoverTrigger asChild>
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        role="combobox"
-                                                        aria-expanded={
-                                                            honorificOpen
-                                                        }
-                                                        className={
-                                                            comboboxTriggerClass
-                                                        }
-                                                        tabIndex={2}
-                                                    >
-                                                        <span className="truncate">
-                                                            {honorificTitle ? (
-                                                                (HONORIFIC_OPTIONS.find(
-                                                                    (o) =>
-                                                                        o.value ===
-                                                                        honorificTitle,
-                                                                )?.label ??
-                                                                honorificTitle)
-                                                            ) : (
-                                                                <span className="text-muted-foreground">
-                                                                    Select
-                                                                    honorific…
-                                                                </span>
-                                                            )}
-                                                        </span>
-                                                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                                                    </Button>
-                                                </PopoverTrigger>
+                                                <input
+                                                    type="hidden"
+                                                    name="honorific_title"
+                                                    value={honorificTitle}
+                                                />
 
-                                                <PopoverContent
-                                                    className="w-[--radix-popover-trigger-width] p-0"
-                                                    align="start"
-                                                    onCloseAutoFocus={(e) =>
-                                                        e.preventDefault()
+                                                <Popover
+                                                    open={honorificOpen}
+                                                    onOpenChange={
+                                                        setHonorificOpen
                                                     }
                                                 >
-                                                    <Command>
-                                                        <CommandInput placeholder="Search honorific…" />
-                                                        <CommandEmpty>
-                                                            No honorific found.
-                                                        </CommandEmpty>
-                                                        <CommandGroup>
-                                                            {HONORIFIC_OPTIONS.map(
-                                                                (item) => (
-                                                                    <CommandItem
-                                                                        key={
-                                                                            item.value
-                                                                        }
-                                                                        value={
-                                                                            item.label
-                                                                        }
-                                                                        onSelect={() => {
-                                                                            setHonorificOpen(
-                                                                                false,
-                                                                            );
-                                                                            setHonorificTitle(
-                                                                                item.value,
-                                                                            );
+                                                    <PopoverTrigger asChild>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            role="combobox"
+                                                            aria-expanded={
+                                                                honorificOpen
+                                                            }
+                                                            className={
+                                                                comboboxTriggerClass
+                                                            }
+                                                            tabIndex={2}
+                                                        >
+                                                            <span className="truncate">
+                                                                {honorificTitle ? (
+                                                                    (HONORIFIC_OPTIONS.find(
+                                                                        (o) =>
+                                                                            o.value ===
+                                                                            honorificTitle,
+                                                                    )?.label ??
+                                                                    honorificTitle)
+                                                                ) : (
+                                                                    <span className="text-muted-foreground">
+                                                                        Select
+                                                                        honorific…
+                                                                    </span>
+                                                                )}
+                                                            </span>
+                                                            <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                                                        </Button>
+                                                    </PopoverTrigger>
 
-                                                                            if (
-                                                                                item.value !==
-                                                                                'other'
-                                                                            ) {
-                                                                                setHonorificOther(
-                                                                                    '',
-                                                                                ); // ✅ clear immediately when not other
-                                                                            }
-                                                                        }}
-                                                                    >
-                                                                        {
-                                                                            item.label
-                                                                        }
-                                                                        <Check
-                                                                            className={cn(
-                                                                                'ml-auto h-4 w-4',
-                                                                                honorificTitle ===
-                                                                                    item.value
-                                                                                    ? 'opacity-100'
-                                                                                    : 'opacity-0',
-                                                                            )}
-                                                                        />
-                                                                    </CommandItem>
-                                                                ),
-                                                            )}
-                                                        </CommandGroup>
-                                                    </Command>
-                                                </PopoverContent>
-                                            </Popover>
-
-                                            <InputError
-                                                message={
-                                                    err.honorific_title &&
-                                                    !honorificTitle
-                                                        ? err.honorific_title
-                                                        : undefined
-                                                }
-                                            />
-                                        </div>
-
-                                        {honorificTitle === 'other' ? (
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="honorific_other">
-                                                    Other honorific
-                                                </Label>
-                                                <Input
-                                                    ref={honorificOtherRef}
-                                                    id="honorific_other"
-                                                    name="honorific_other"
-                                                    value={honorificOther}
-                                                    onChange={(e) =>
-                                                        setHonorificOther(
-                                                            e.target.value,
-                                                        )
-                                                    }
-                                                    maxLength={50}
-                                                    placeholder="Please specify"
-                                                    className={inputClass}
-                                                />
-                                                <InputError
-                                                    message={showIfEmpty(
-                                                        err.honorific_other,
-                                                        honorificOther,
-                                                    )}
-                                                />
-                                            </div>
-                                        ) : null}
-
-                                        <div className="grid gap-4 sm:grid-cols-3">
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="given_name">
-                                                    Given Name / First Name{' '}
-                                                    <span className="text-[11px] font-semibold text-red-600">
-                                                        {' '}
-                                                        *
-                                                    </span>
-                                                </Label>
-                                                <Input
-                                                    id="given_name"
-                                                    type="text"
-                                                    tabIndex={
-                                                        honorificTitle ===
-                                                        'other'
-                                                            ? 4
-                                                            : 3
-                                                    }
-                                                    autoComplete="given-name"
-                                                    name="given_name"
-                                                    placeholder="e.g. JUAN"
-                                                    className={inputClass}
-                                                />
-
-                                                <InputError
-                                                    message={
-                                                        err.given_name &&
-                                                        shouldShowError(
-                                                            'given_name',
-                                                        )
-                                                            ? err.given_name
-                                                            : undefined
-                                                    }
-                                                />
-                                            </div>
-
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="middle_name">
-                                                    Middle Name
-                                                </Label>
-                                                <Input
-                                                    id="middle_name"
-                                                    type="text"
-                                                    tabIndex={
-                                                        honorificTitle ===
-                                                        'other'
-                                                            ? 5
-                                                            : 4
-                                                    }
-                                                    autoComplete="additional-name"
-                                                    name="middle_name"
-                                                    placeholder="e.g. SANTOS"
-                                                    className={inputClass}
-                                                />
-
-                                                <InputError
-                                                    message={
-                                                        err.middle_name &&
-                                                        shouldShowError(
-                                                            'middle_name',
-                                                        )
-                                                            ? err.middle_name
-                                                            : undefined
-                                                    }
-                                                />
-                                            </div>
-
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="family_name">
-                                                    Family Name / Surname{' '}
-                                                    <span className="text-[11px] font-semibold text-red-600">
-                                                        {' '}
-                                                        *
-                                                    </span>
-                                                </Label>
-                                                <Input
-                                                    id="family_name"
-                                                    type="text"
-                                                    tabIndex={
-                                                        honorificTitle ===
-                                                        'other'
-                                                            ? 6
-                                                            : 5
-                                                    }
-                                                    autoComplete="family-name"
-                                                    name="family_name"
-                                                    placeholder="e.g. DELA CRUZ"
-                                                    className={inputClass}
-                                                />
-                                                <InputError
-                                                    message={
-                                                        err.family_name &&
-                                                        shouldShowError(
-                                                            'family_name',
-                                                        )
-                                                            ? err.family_name
-                                                            : undefined
-                                                    }
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="suffix">
-                                                Suffix
-                                            </Label>
-                                            <Input
-                                                id="suffix"
-                                                type="text"
-                                                tabIndex={
-                                                    honorificTitle === 'other'
-                                                        ? 7
-                                                        : 6
-                                                }
-                                                name="suffix"
-                                                placeholder="e.g. Jr., III"
-                                                className={inputClass}
-                                            />
-
-                                            <InputError
-                                                message={
-                                                    err.suffix &&
-                                                    shouldShowError('suffix')
-                                                        ? err.suffix
-                                                        : undefined
-                                                }
-                                            />
-                                        </div>
-
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="sex_assigned_at_birth">
-                                                Sex assigned at birth{' '}
-                                                <span className="text-[11px] font-semibold text-red-600">
-                                                    {' '}
-                                                    *
-                                                </span>
-                                            </Label>
-
-                                            <input
-                                                type="hidden"
-                                                name="sex_assigned_at_birth"
-                                                value={sexAssignedAtBirth}
-                                            />
-
-                                            <Popover
-                                                open={sexOpen}
-                                                onOpenChange={setSexOpen}
-                                            >
-                                                <PopoverTrigger asChild>
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        role="combobox"
-                                                        aria-expanded={sexOpen}
-                                                        className={
-                                                            comboboxTriggerClass
+                                                    <PopoverContent
+                                                        className="w-[--radix-popover-trigger-width] p-0"
+                                                        align="start"
+                                                        onCloseAutoFocus={(e) =>
+                                                            e.preventDefault()
                                                         }
+                                                    >
+                                                        <Command>
+                                                            <CommandInput placeholder="Search honorific…" />
+                                                            <CommandEmpty>
+                                                                No honorific
+                                                                found.
+                                                            </CommandEmpty>
+                                                            <CommandGroup>
+                                                                {HONORIFIC_OPTIONS.map(
+                                                                    (item) => (
+                                                                        <CommandItem
+                                                                            key={
+                                                                                item.value
+                                                                            }
+                                                                            value={
+                                                                                item.label
+                                                                            }
+                                                                            onSelect={() => {
+                                                                                setHonorificOpen(
+                                                                                    false,
+                                                                                );
+                                                                                setHonorificTitle(
+                                                                                    item.value,
+                                                                                );
+
+                                                                                if (
+                                                                                    item.value !==
+                                                                                    'other'
+                                                                                ) {
+                                                                                    setHonorificOther(
+                                                                                        '',
+                                                                                    ); // ✅ clear immediately when not other
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            {
+                                                                                item.label
+                                                                            }
+                                                                            <Check
+                                                                                className={cn(
+                                                                                    'ml-auto h-4 w-4',
+                                                                                    honorificTitle ===
+                                                                                        item.value
+                                                                                        ? 'opacity-100'
+                                                                                        : 'opacity-0',
+                                                                                )}
+                                                                            />
+                                                                        </CommandItem>
+                                                                    ),
+                                                                )}
+                                                            </CommandGroup>
+                                                        </Command>
+                                                    </PopoverContent>
+                                                </Popover>
+
+                                                <InputError
+                                                    message={
+                                                        err.honorific_title &&
+                                                        !honorificTitle
+                                                            ? err.honorific_title
+                                                            : undefined
+                                                    }
+                                                />
+                                            </div>
+
+                                            {honorificTitle === 'other' ? (
+                                                <div className="grid gap-2">
+                                                    <Label htmlFor="honorific_other">
+                                                        Other honorific
+                                                    </Label>
+                                                    <Input
+                                                        ref={honorificOtherRef}
+                                                        id="honorific_other"
+                                                        name="honorific_other"
+                                                        value={honorificOther}
+                                                        onChange={(e) =>
+                                                            setHonorificOther(
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                        maxLength={50}
+                                                        placeholder="Please specify"
+                                                        className={inputClass}
+                                                    />
+                                                    <InputError
+                                                        message={showIfEmpty(
+                                                            err.honorific_other,
+                                                            honorificOther,
+                                                        )}
+                                                    />
+                                                </div>
+                                            ) : null}
+
+                                            <div className="grid gap-4 sm:grid-cols-3">
+                                                <div className="grid gap-2">
+                                                    <Label htmlFor="given_name">
+                                                        Given Name / First Name{' '}
+                                                        <span className="text-[11px] font-semibold text-red-600">
+                                                            {' '}
+                                                            *
+                                                        </span>
+                                                    </Label>
+                                                    <Input
+                                                        id="given_name"
+                                                        type="text"
                                                         tabIndex={
                                                             honorificTitle ===
                                                             'other'
-                                                                ? 8
-                                                                : 7
+                                                                ? 4
+                                                                : 3
                                                         }
-                                                    >
-                                                        <span className="truncate">
-                                                            {sexAssignedAtBirth ? (
-                                                                (SEX_ASSIGNED_OPTIONS.find(
-                                                                    (o) =>
-                                                                        o.value ===
-                                                                        sexAssignedAtBirth,
-                                                                )?.label ??
-                                                                sexAssignedAtBirth)
-                                                            ) : (
-                                                                <span className="text-muted-foreground">
-                                                                    Select…
-                                                                </span>
-                                                            )}
-                                                        </span>
-                                                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                                                    </Button>
-                                                </PopoverTrigger>
+                                                        autoComplete="given-name"
+                                                        name="given_name"
+                                                        placeholder="e.g. JUAN"
+                                                        className={inputClass}
+                                                    />
 
-                                                <PopoverContent
-                                                    className="w-[--radix-popover-trigger-width] p-0"
-                                                    align="start"
-                                                >
-                                                    <Command>
-                                                        <CommandInput placeholder="Search…" />
-                                                        <CommandEmpty>
-                                                            No option found.
-                                                        </CommandEmpty>
-                                                        <CommandGroup>
-                                                            {SEX_ASSIGNED_OPTIONS.map(
-                                                                (item) => (
-                                                                    <CommandItem
-                                                                        key={
-                                                                            item.value
-                                                                        }
-                                                                        value={
-                                                                            item.label
-                                                                        }
-                                                                        onSelect={() => {
-                                                                            setSexAssignedAtBirth(
-                                                                                item.value,
-                                                                            );
-                                                                            setSexOpen(
-                                                                                false,
-                                                                            );
-                                                                        }}
-                                                                    >
-                                                                        {
-                                                                            item.label
-                                                                        }
-                                                                        <Check
-                                                                            className={cn(
-                                                                                'ml-auto h-4 w-4',
-                                                                                sexAssignedAtBirth ===
-                                                                                    item.value
-                                                                                    ? 'opacity-100'
-                                                                                    : 'opacity-0',
-                                                                            )}
-                                                                        />
-                                                                    </CommandItem>
-                                                                ),
-                                                            )}
-                                                        </CommandGroup>
-                                                    </Command>
-                                                </PopoverContent>
-                                            </Popover>
-
-                                            <InputError
-                                                message={
-                                                    err.sex_assigned_at_birth &&
-                                                    !sexAssignedAtBirth
-                                                        ? err.sex_assigned_at_birth
-                                                        : undefined
-                                                }
-                                            />
-                                        </div>
-
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="profile_photo">
-                                                Preferred image for ID
-                                            </Label>
-                                            <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center">
-                                                <div className="grid justify-items-center gap-2">
-                                                    <div className="grid size-32 place-items-center overflow-hidden rounded-full border border-slate-200 bg-slate-50 shadow-sm ring-4 ring-white">
-                                                        {preferredImagePreviewUrl ? (
-                                                            <img
-                                                                src={
-                                                                    preferredImagePreviewUrl
-                                                                }
-                                                                alt="Preferred image preview"
-                                                                className="size-full object-cover"
-                                                            />
-                                                        ) : (
-                                                            <ImagePlus className="size-9 text-slate-400" />
-                                                        )}
-                                                    </div>
-                                                    <p className="text-xs text-slate-500">
-                                                        Circle crop preview
-                                                    </p>
+                                                    <InputError
+                                                        message={
+                                                            err.given_name &&
+                                                            shouldShowError(
+                                                                'given_name',
+                                                            )
+                                                                ? err.given_name
+                                                                : undefined
+                                                        }
+                                                    />
                                                 </div>
 
-                                                <div className="grid flex-1 gap-2">
-                                                    <p className="text-sm text-slate-600">
-                                                        Upload a clear front
-                                                        facing photo. You can
-                                                        resize and position the
-                                                        circular crop before it
-                                                        is attached to your
-                                                        registration.
-                                                    </p>
-                                                    <div className="flex flex-wrap gap-2">
-                                                        <Label
-                                                            htmlFor="profile_photo"
-                                                            className="inline-flex h-9 cursor-pointer items-center justify-center rounded-lg bg-[#0033A0] px-4 text-sm font-medium text-white shadow-sm transition hover:bg-[#002b86]"
-                                                        >
-                                                            Upload image
-                                                        </Label>
-                                                        {preferredImagePreviewUrl ? (
-                                                            <Button
-                                                                type="button"
-                                                                variant="outline"
-                                                                size="sm"
-                                                                className="h-9 rounded-lg"
-                                                                onClick={
-                                                                    handleRemovePreferredImage
-                                                                }
-                                                            >
-                                                                Remove image
-                                                            </Button>
-                                                        ) : null}
-                                                    </div>
+                                                <div className="grid gap-2">
+                                                    <Label htmlFor="middle_name">
+                                                        Middle Name
+                                                    </Label>
                                                     <Input
-                                                        ref={
-                                                            preferredImageInputRef
+                                                        id="middle_name"
+                                                        type="text"
+                                                        tabIndex={
+                                                            honorificTitle ===
+                                                            'other'
+                                                                ? 5
+                                                                : 4
                                                         }
-                                                        id="profile_photo"
-                                                        type="file"
-                                                        name="profile_photo"
-                                                        accept="image/png,image/jpeg"
-                                                        onChange={
-                                                            handlePreferredImageChange
+                                                        autoComplete="additional-name"
+                                                        name="middle_name"
+                                                        placeholder="e.g. SANTOS"
+                                                        className={inputClass}
+                                                    />
+
+                                                    <InputError
+                                                        message={
+                                                            err.middle_name &&
+                                                            shouldShowError(
+                                                                'middle_name',
+                                                            )
+                                                                ? err.middle_name
+                                                                : undefined
                                                         }
-                                                        className="sr-only"
+                                                    />
+                                                </div>
+
+                                                <div className="grid gap-2">
+                                                    <Label htmlFor="family_name">
+                                                        Family Name / Surname{' '}
+                                                        <span className="text-[11px] font-semibold text-red-600">
+                                                            {' '}
+                                                            *
+                                                        </span>
+                                                    </Label>
+                                                    <Input
+                                                        id="family_name"
+                                                        type="text"
+                                                        tabIndex={
+                                                            honorificTitle ===
+                                                            'other'
+                                                                ? 6
+                                                                : 5
+                                                        }
+                                                        autoComplete="family-name"
+                                                        name="family_name"
+                                                        placeholder="e.g. DELA CRUZ"
+                                                        className={inputClass}
+                                                    />
+                                                    <InputError
+                                                        message={
+                                                            err.family_name &&
+                                                            shouldShowError(
+                                                                'family_name',
+                                                            )
+                                                                ? err.family_name
+                                                                : undefined
+                                                        }
                                                     />
                                                 </div>
                                             </div>
 
-                                            <InputError
-                                                message={
-                                                    preferredImageError ||
-                                                    err.profile_photo
-                                                }
-                                            />
-                                        </div>
-                                    </fieldset>
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="suffix">
+                                                    Suffix
+                                                </Label>
+                                                <Input
+                                                    id="suffix"
+                                                    type="text"
+                                                    tabIndex={
+                                                        honorificTitle ===
+                                                        'other'
+                                                            ? 7
+                                                            : 6
+                                                    }
+                                                    name="suffix"
+                                                    placeholder="e.g. Jr., III"
+                                                    className={inputClass}
+                                                />
+
+                                                <InputError
+                                                    message={
+                                                        err.suffix &&
+                                                        shouldShowError(
+                                                            'suffix',
+                                                        )
+                                                            ? err.suffix
+                                                            : undefined
+                                                    }
+                                                />
+                                            </div>
+
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="sex_assigned_at_birth">
+                                                    Sex assigned at birth{' '}
+                                                    <span className="text-[11px] font-semibold text-red-600">
+                                                        {' '}
+                                                        *
+                                                    </span>
+                                                </Label>
+
+                                                <input
+                                                    type="hidden"
+                                                    name="sex_assigned_at_birth"
+                                                    value={sexAssignedAtBirth}
+                                                />
+
+                                                <Popover
+                                                    open={sexOpen}
+                                                    onOpenChange={setSexOpen}
+                                                >
+                                                    <PopoverTrigger asChild>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            role="combobox"
+                                                            aria-expanded={
+                                                                sexOpen
+                                                            }
+                                                            className={
+                                                                comboboxTriggerClass
+                                                            }
+                                                            tabIndex={
+                                                                honorificTitle ===
+                                                                'other'
+                                                                    ? 8
+                                                                    : 7
+                                                            }
+                                                        >
+                                                            <span className="truncate">
+                                                                {sexAssignedAtBirth ? (
+                                                                    (SEX_ASSIGNED_OPTIONS.find(
+                                                                        (o) =>
+                                                                            o.value ===
+                                                                            sexAssignedAtBirth,
+                                                                    )?.label ??
+                                                                    sexAssignedAtBirth)
+                                                                ) : (
+                                                                    <span className="text-muted-foreground">
+                                                                        Select…
+                                                                    </span>
+                                                                )}
+                                                            </span>
+                                                            <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                                                        </Button>
+                                                    </PopoverTrigger>
+
+                                                    <PopoverContent
+                                                        className="w-[--radix-popover-trigger-width] p-0"
+                                                        align="start"
+                                                    >
+                                                        <Command>
+                                                            <CommandInput placeholder="Search…" />
+                                                            <CommandEmpty>
+                                                                No option found.
+                                                            </CommandEmpty>
+                                                            <CommandGroup>
+                                                                {SEX_ASSIGNED_OPTIONS.map(
+                                                                    (item) => (
+                                                                        <CommandItem
+                                                                            key={
+                                                                                item.value
+                                                                            }
+                                                                            value={
+                                                                                item.label
+                                                                            }
+                                                                            onSelect={() => {
+                                                                                setSexAssignedAtBirth(
+                                                                                    item.value,
+                                                                                );
+                                                                                setSexOpen(
+                                                                                    false,
+                                                                                );
+                                                                            }}
+                                                                        >
+                                                                            {
+                                                                                item.label
+                                                                            }
+                                                                            <Check
+                                                                                className={cn(
+                                                                                    'ml-auto h-4 w-4',
+                                                                                    sexAssignedAtBirth ===
+                                                                                        item.value
+                                                                                        ? 'opacity-100'
+                                                                                        : 'opacity-0',
+                                                                                )}
+                                                                            />
+                                                                        </CommandItem>
+                                                                    ),
+                                                                )}
+                                                            </CommandGroup>
+                                                        </Command>
+                                                    </PopoverContent>
+                                                </Popover>
+
+                                                <InputError
+                                                    message={
+                                                        err.sex_assigned_at_birth &&
+                                                        !sexAssignedAtBirth
+                                                            ? err.sex_assigned_at_birth
+                                                            : undefined
+                                                    }
+                                                />
+                                            </div>
+
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="profile_photo">
+                                                    Preferred image for ID
+                                                </Label>
+                                                <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center">
+                                                    <div className="grid justify-items-center gap-2">
+                                                        <div className="grid size-32 place-items-center overflow-hidden rounded-full border border-slate-200 bg-slate-50 shadow-sm ring-4 ring-white">
+                                                            {preferredImagePreviewUrl ? (
+                                                                <img
+                                                                    src={
+                                                                        preferredImagePreviewUrl
+                                                                    }
+                                                                    alt="Preferred image preview"
+                                                                    className="size-full object-cover"
+                                                                />
+                                                            ) : (
+                                                                <ImagePlus className="size-9 text-slate-400" />
+                                                            )}
+                                                        </div>
+                                                        <p className="text-xs text-slate-500">
+                                                            Circle crop preview
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="grid flex-1 gap-2">
+                                                        <p className="text-sm text-slate-600">
+                                                            Upload a clear front
+                                                            facing photo. You
+                                                            can resize and
+                                                            position the
+                                                            circular crop before
+                                                            it is attached to
+                                                            your registration.
+                                                        </p>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <Label
+                                                                htmlFor="profile_photo"
+                                                                className="inline-flex h-9 cursor-pointer items-center justify-center rounded-lg bg-[#0033A0] px-4 text-sm font-medium text-white shadow-sm transition hover:bg-[#002b86]"
+                                                            >
+                                                                Upload image
+                                                            </Label>
+                                                            {preferredImagePreviewUrl ? (
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className="h-9 rounded-lg"
+                                                                    onClick={
+                                                                        handleRemovePreferredImage
+                                                                    }
+                                                                >
+                                                                    Remove image
+                                                                </Button>
+                                                            ) : null}
+                                                        </div>
+                                                        <Input
+                                                            ref={
+                                                                preferredImageInputRef
+                                                            }
+                                                            id="profile_photo"
+                                                            type="file"
+                                                            name="profile_photo"
+                                                            accept="image/png,image/jpeg"
+                                                            onChange={
+                                                                handlePreferredImageChange
+                                                            }
+                                                            className="sr-only"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <InputError
+                                                    message={
+                                                        preferredImageError ||
+                                                        err.profile_photo
+                                                    }
+                                                />
+                                            </div>
+                                        </fieldset>
                                     ) : null}
 
                                     <fieldset
@@ -3848,251 +4218,174 @@ export default function Register({
                                                                 programme.registration_fields ??
                                                                 []
                                                             )
-                                                                .filter((field) =>
-                                                                    isRegistrationFieldVisible(
-                                                                        programme,
-                                                                        field,
-                                                                        registrationResponses,
-                                                                    ),
+                                                                .filter(
+                                                                    (field) =>
+                                                                        isRegistrationFieldVisible(
+                                                                            programme,
+                                                                            field,
+                                                                            registrationResponses,
+                                                                        ),
                                                                 )
-                                                                .map((field) => {
-                                                                const value =
-                                                                    getDynamicValue(
-                                                                        programme.id,
-                                                                        field.id,
-                                                                    );
-                                                                const stringValue =
-                                                                    Array.isArray(
-                                                                        value,
-                                                                    )
-                                                                        ? ''
-                                                                        : value;
-                                                                const fieldErrorKey =
-                                                                    dynamicErrorKey(
-                                                                        programme.id,
-                                                                        field.id,
-                                                                    );
-                                                                const fieldError =
-                                                                    err[
-                                                                        fieldErrorKey
-                                                                    ];
-                                                                const otherError =
-                                                                    err[
-                                                                        dynamicOtherErrorKey(
-                                                                            programme.id,
-                                                                            field.id,
-                                                                        )
-                                                                    ];
-                                                                const otherValue =
-                                                                    getDynamicOtherValue(
-                                                                        programme.id,
-                                                                        field.id,
-                                                                    );
-                                                                const fieldHasOther =
-                                                                    (
-                                                                        field.options ??
-                                                                        []
-                                                                    ).some(
-                                                                        (
-                                                                            option,
-                                                                        ) =>
-                                                                            option
-                                                                                .trim()
-                                                                                .toLowerCase() ===
-                                                                            'other',
-                                                                    );
-                                                                const fieldOtherSelected =
-                                                                    fieldHasOther &&
-                                                                    (Array.isArray(
-                                                                        value,
-                                                                    )
-                                                                        ? value.some(
-                                                                              (
-                                                                                  item,
-                                                                              ) =>
-                                                                                  String(
-                                                                                      item,
+                                                                .map(
+                                                                    (field) => {
+                                                                        const value =
+                                                                            getDynamicValue(
+                                                                                programme.id,
+                                                                                field.id,
+                                                                            );
+                                                                        const stringValue =
+                                                                            Array.isArray(
+                                                                                value,
+                                                                            )
+                                                                                ? ''
+                                                                                : value;
+                                                                        const fieldErrorKey =
+                                                                            dynamicErrorKey(
+                                                                                programme.id,
+                                                                                field.id,
+                                                                            );
+                                                                        const fieldError =
+                                                                            err[
+                                                                                fieldErrorKey
+                                                                            ];
+                                                                        const otherError =
+                                                                            err[
+                                                                                dynamicOtherErrorKey(
+                                                                                    programme.id,
+                                                                                    field.id,
+                                                                                )
+                                                                            ];
+                                                                        const otherValue =
+                                                                            getDynamicOtherValue(
+                                                                                programme.id,
+                                                                                field.id,
+                                                                            );
+                                                                        const fieldHasOther =
+                                                                            (
+                                                                                field.options ??
+                                                                                []
+                                                                            ).some(
+                                                                                (
+                                                                                    option,
+                                                                                ) =>
+                                                                                    option
+                                                                                        .trim()
+                                                                                        .toLowerCase() ===
+                                                                                    'other',
+                                                                            );
+                                                                        const fieldOtherSelected =
+                                                                            fieldHasOther &&
+                                                                            (Array.isArray(
+                                                                                value,
+                                                                            )
+                                                                                ? value.some(
+                                                                                      (
+                                                                                          item,
+                                                                                      ) =>
+                                                                                          String(
+                                                                                              item,
+                                                                                          )
+                                                                                              .trim()
+                                                                                              .toLowerCase() ===
+                                                                                          'other',
+                                                                                  )
+                                                                                : String(
+                                                                                      value,
                                                                                   )
                                                                                       .trim()
                                                                                       .toLowerCase() ===
-                                                                                  'other',
-                                                                          )
-                                                                        : String(
-                                                                              value,
-                                                                          )
-                                                                              .trim()
-                                                                              .toLowerCase() ===
-                                                                          'other');
-                                                                const isCountryDelegationCountry =
-                                                                    field.field_key ===
-                                                                    'country_delegation_country';
-                                                                const isAsemme10ConsentField =
-                                                                    isAsemme10Registration &&
-                                                                    ASEMME_CONSENT_FIELD_KEYS.has(
-                                                                        field.field_key,
-                                                                    );
+                                                                                  'other');
+                                                                        const isCountryDelegationCountry =
+                                                                            field.field_key ===
+                                                                            'country_delegation_country';
+                                                                        const isAsemme10ConsentField =
+                                                                            isAsemme10Registration &&
+                                                                            ASEMME_CONSENT_FIELD_KEYS.has(
+                                                                                field.field_key,
+                                                                            );
 
-                                                                if (
-                                                                    field.field_type ===
-                                                                    'section'
-                                                                ) {
-                                                                    return (
-                                                                        <div
-                                                                            key={
-                                                                                field.id
-                                                                            }
-                                                                            className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0"
-                                                                        >
-                                                                            <p className="text-sm font-semibold tracking-wide text-slate-800 uppercase">
-                                                                                {
-                                                                                    field.label
-                                                                                }
-                                                                            </p>
-                                                                            {field.help_text ? (
-                                                                                <p className="mt-1 text-sm text-slate-500">
-                                                                                    {
-                                                                                        field.help_text
+                                                                        if (
+                                                                            field.field_type ===
+                                                                            'section'
+                                                                        ) {
+                                                                            return (
+                                                                                <div
+                                                                                    key={
+                                                                                        field.id
                                                                                     }
-                                                                                </p>
-                                                                            ) : null}
-                                                                        </div>
-                                                                    );
-                                                                }
-
-                                                                if (
-                                                                    isAsemme10Registration &&
-                                                                    isCountryDelegationCountry
-                                                                ) {
-                                                                    return (
-                                                                        <div
-                                                                            key={
-                                                                                field.id
-                                                                            }
-                                                                            data-error-key={
-                                                                                fieldErrorKey
-                                                                            }
-                                                                            className="grid gap-2"
-                                                                        >
-                                                                            <Label>
-                                                                                {
-                                                                                    field.label
-                                                                                }
-                                                                            </Label>
-                                                                            <Popover
-                                                                                open={
-                                                                                    countryOpen
-                                                                                }
-                                                                                onOpenChange={
-                                                                                    setCountryOpen
-                                                                                }
-                                                                            >
-                                                                                <PopoverTrigger
-                                                                                    asChild
+                                                                                    className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0"
                                                                                 >
-                                                                                    <Button
-                                                                                        type="button"
-                                                                                        variant="outline"
-                                                                                        role="combobox"
-                                                                                        aria-expanded={
+                                                                                    <p className="text-sm font-semibold tracking-wide text-slate-800 uppercase">
+                                                                                        {
+                                                                                            field.label
+                                                                                        }
+                                                                                    </p>
+                                                                                    {field.help_text ? (
+                                                                                        <p className="mt-1 text-sm text-slate-500">
+                                                                                            {
+                                                                                                field.help_text
+                                                                                            }
+                                                                                        </p>
+                                                                                    ) : null}
+                                                                                </div>
+                                                                            );
+                                                                        }
+
+                                                                        if (
+                                                                            isAsemme10Registration &&
+                                                                            isCountryDelegationCountry
+                                                                        ) {
+                                                                            return (
+                                                                                <div
+                                                                                    key={
+                                                                                        field.id
+                                                                                    }
+                                                                                    data-error-key={
+                                                                                        fieldErrorKey
+                                                                                    }
+                                                                                    className="grid gap-2"
+                                                                                >
+                                                                                    <Label>
+                                                                                        {
+                                                                                            field.label
+                                                                                        }
+                                                                                    </Label>
+                                                                                    <Popover
+                                                                                        open={
                                                                                             countryOpen
                                                                                         }
-                                                                                        className={
-                                                                                            comboboxTriggerClass
+                                                                                        onOpenChange={
+                                                                                            setCountryOpen
                                                                                         }
                                                                                     >
-                                                                                        <span className="flex min-w-0 items-center gap-2">
-                                                                                            {countryOther ? (
-                                                                                                <span className="truncate">
-                                                                                                    Other:{' '}
-                                                                                                    {
-                                                                                                        countryOther
-                                                                                                    }
-                                                                                                </span>
-                                                                                            ) : selectedCountry ? (
-                                                                                                <>
-                                                                                                    {selectedCountry.flag_url ? (
-                                                                                                        <img
-                                                                                                            src={
-                                                                                                                selectedCountry.flag_url
-                                                                                                            }
-                                                                                                            alt=""
-                                                                                                            className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
-                                                                                                            loading="lazy"
-                                                                                                            draggable={
-                                                                                                                false
-                                                                                                            }
-                                                                                                        />
-                                                                                                    ) : (
-                                                                                                        <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
+                                                                                        <PopoverTrigger
+                                                                                            asChild
+                                                                                        >
+                                                                                            <Button
+                                                                                                type="button"
+                                                                                                variant="outline"
+                                                                                                role="combobox"
+                                                                                                aria-expanded={
+                                                                                                    countryOpen
+                                                                                                }
+                                                                                                className={
+                                                                                                    comboboxTriggerClass
+                                                                                                }
+                                                                                            >
+                                                                                                <span className="flex min-w-0 items-center gap-2">
+                                                                                                    {countryOther ? (
+                                                                                                        <span className="truncate">
+                                                                                                            Other:{' '}
                                                                                                             {
-                                                                                                                selectedCountry.code
+                                                                                                                countryOther
                                                                                                             }
                                                                                                         </span>
-                                                                                                    )}
-                                                                                                    <span className="truncate">
-                                                                                                        {
-                                                                                                            selectedCountry.name
-                                                                                                        }
-                                                                                                    </span>
-                                                                                                </>
-                                                                                            ) : (
-                                                                                                <span className="text-muted-foreground">
-                                                                                                    Select
-                                                                                                    country...
-                                                                                                </span>
-                                                                                            )}
-                                                                                        </span>
-                                                                                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                                                                                    </Button>
-                                                                                </PopoverTrigger>
-                                                                                <PopoverContent
-                                                                                    className="z-50 w-[--radix-popover-trigger-width] p-0"
-                                                                                    align="start"
-                                                                                >
-                                                                                    <Command>
-                                                                                        <CommandInput placeholder="Search country..." />
-                                                                                        <CommandEmpty>
-                                                                                            No
-                                                                                            country
-                                                                                            found.
-                                                                                        </CommandEmpty>
-                                                                                        <CommandList className="max-h-[320px] overflow-auto overscroll-contain sm:max-h-[380px]">
-                                                                                            <CommandGroup heading="ASEAN Countries">
-                                                                                                {groupedCountries.asean.map(
-                                                                                                    (
-                                                                                                        item,
-                                                                                                    ) => (
-                                                                                                        <CommandItem
-                                                                                                            key={
-                                                                                                                item.id
-                                                                                                            }
-                                                                                                            value={
-                                                                                                                item.name
-                                                                                                            }
-                                                                                                            onSelect={() => {
-                                                                                                                setCountry(
-                                                                                                                    String(
-                                                                                                                        item.id,
-                                                                                                                    ),
-                                                                                                                );
-                                                                                                                setCountryOther(
-                                                                                                                    '',
-                                                                                                                );
-                                                                                                                setDynamicValue(
-                                                                                                                    programme.id,
-                                                                                                                    field.id,
-                                                                                                                    item.name,
-                                                                                                                );
-                                                                                                                setCountryOpen(
-                                                                                                                    false,
-                                                                                                                );
-                                                                                                            }}
-                                                                                                            className="gap-2"
-                                                                                                        >
-                                                                                                            {item.flag_url ? (
+                                                                                                    ) : selectedCountry ? (
+                                                                                                        <>
+                                                                                                            {selectedCountry.flag_url ? (
                                                                                                                 <img
                                                                                                                     src={
-                                                                                                                        item.flag_url
+                                                                                                                        selectedCountry.flag_url
                                                                                                                     }
                                                                                                                     alt=""
                                                                                                                     className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
@@ -4104,553 +4397,637 @@ export default function Register({
                                                                                                             ) : (
                                                                                                                 <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
                                                                                                                     {
-                                                                                                                        item.code
+                                                                                                                        selectedCountry.code
                                                                                                                     }
                                                                                                                 </span>
                                                                                                             )}
                                                                                                             <span className="truncate">
                                                                                                                 {
-                                                                                                                    item.name
+                                                                                                                    selectedCountry.name
                                                                                                                 }
                                                                                                             </span>
-                                                                                                            <Check
-                                                                                                                className={cn(
-                                                                                                                    'ml-auto h-4 w-4',
-                                                                                                                    country ===
-                                                                                                                        String(
-                                                                                                                            item.id,
-                                                                                                                        ) &&
-                                                                                                                        !countryOther
-                                                                                                                        ? 'opacity-100'
-                                                                                                                        : 'opacity-0',
-                                                                                                                )}
-                                                                                                            />
-                                                                                                        </CommandItem>
-                                                                                                    ),
-                                                                                                )}
-                                                                                            </CommandGroup>
-                                                                                            {groupedCountries.nonAsean.length >
-                                                                                            0 ? (
-                                                                                                <CommandGroup heading="Non-ASEAN Countries">
-                                                                                                    {groupedCountries.nonAsean.map(
-                                                                                                        (
-                                                                                                            item,
-                                                                                                        ) => (
-                                                                                                            <CommandItem
-                                                                                                                key={
-                                                                                                                    item.id
-                                                                                                                }
-                                                                                                                value={`${item.name} ${item.code}`}
-                                                                                                                onSelect={() => {
-                                                                                                                    setCountry(
-                                                                                                                        String(
-                                                                                                                            item.id,
-                                                                                                                        ),
-                                                                                                                    );
-                                                                                                                    setCountryOther(
-                                                                                                                        '',
-                                                                                                                    );
-                                                                                                                    setDynamicValue(
-                                                                                                                        programme.id,
-                                                                                                                        field.id,
-                                                                                                                        item.name,
-                                                                                                                    );
-                                                                                                                    setCountryOpen(
-                                                                                                                        false,
-                                                                                                                    );
-                                                                                                                }}
-                                                                                                                className="gap-2"
-                                                                                                            >
-                                                                                                                {item.flag_url ? (
-                                                                                                                    <img
-                                                                                                                        src={
-                                                                                                                            item.flag_url
-                                                                                                                        }
-                                                                                                                        alt=""
-                                                                                                                        className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
-                                                                                                                        loading="lazy"
-                                                                                                                        draggable={
-                                                                                                                            false
-                                                                                                                        }
-                                                                                                                    />
-                                                                                                                ) : (
-                                                                                                                    <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
-                                                                                                                        {
-                                                                                                                            item.code
-                                                                                                                        }
-                                                                                                                    </span>
-                                                                                                                )}
-                                                                                                                <span className="truncate">
-                                                                                                                    {
+                                                                                                        </>
+                                                                                                    ) : (
+                                                                                                        <span className="text-muted-foreground">
+                                                                                                            Select
+                                                                                                            country...
+                                                                                                        </span>
+                                                                                                    )}
+                                                                                                </span>
+                                                                                                <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                                                                                            </Button>
+                                                                                        </PopoverTrigger>
+                                                                                        <PopoverContent
+                                                                                            className="z-50 w-[--radix-popover-trigger-width] p-0"
+                                                                                            align="start"
+                                                                                        >
+                                                                                            <Command>
+                                                                                                <CommandInput placeholder="Search country..." />
+                                                                                                <CommandEmpty>
+                                                                                                    No
+                                                                                                    country
+                                                                                                    found.
+                                                                                                </CommandEmpty>
+                                                                                                <CommandList className="max-h-[320px] overflow-auto overscroll-contain sm:max-h-[380px]">
+                                                                                                    <CommandGroup heading="ASEAN Countries">
+                                                                                                        {groupedCountries.asean.map(
+                                                                                                            (
+                                                                                                                item,
+                                                                                                            ) => (
+                                                                                                                <CommandItem
+                                                                                                                    key={
+                                                                                                                        item.id
+                                                                                                                    }
+                                                                                                                    value={
                                                                                                                         item.name
                                                                                                                     }
-                                                                                                                </span>
-                                                                                                                <Check
-                                                                                                                    className={cn(
-                                                                                                                        'ml-auto h-4 w-4',
-                                                                                                                        country ===
+                                                                                                                    onSelect={() => {
+                                                                                                                        setCountry(
                                                                                                                             String(
                                                                                                                                 item.id,
-                                                                                                                            ) &&
-                                                                                                                            !countryOther
-                                                                                                                            ? 'opacity-100'
-                                                                                                                            : 'opacity-0',
+                                                                                                                            ),
+                                                                                                                        );
+                                                                                                                        setCountryOther(
+                                                                                                                            '',
+                                                                                                                        );
+                                                                                                                        setDynamicValue(
+                                                                                                                            programme.id,
+                                                                                                                            field.id,
+                                                                                                                            item.name,
+                                                                                                                        );
+                                                                                                                        setCountryOpen(
+                                                                                                                            false,
+                                                                                                                        );
+                                                                                                                    }}
+                                                                                                                    className="gap-2"
+                                                                                                                >
+                                                                                                                    {item.flag_url ? (
+                                                                                                                        <img
+                                                                                                                            src={
+                                                                                                                                item.flag_url
+                                                                                                                            }
+                                                                                                                            alt=""
+                                                                                                                            className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
+                                                                                                                            loading="lazy"
+                                                                                                                            draggable={
+                                                                                                                                false
+                                                                                                                            }
+                                                                                                                        />
+                                                                                                                    ) : (
+                                                                                                                        <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
+                                                                                                                            {
+                                                                                                                                item.code
+                                                                                                                            }
+                                                                                                                        </span>
                                                                                                                     )}
-                                                                                                                />
-                                                                                                            </CommandItem>
-                                                                                                        ),
-                                                                                                    )}
-                                                                                                </CommandGroup>
-                                                                                            ) : null}
-                                                                                            <CommandGroup heading="Other">
-                                                                                                <CommandItem
-                                                                                                    value="Other country"
-                                                                                                    onSelect={() => {
-                                                                                                        setCountry(
-                                                                                                            '',
-                                                                                                        );
-                                                                                                        setCountryOther(
-                                                                                                            'Other',
-                                                                                                        );
-                                                                                                        setDynamicValue(
-                                                                                                            programme.id,
-                                                                                                            field.id,
-                                                                                                            'Other',
-                                                                                                        );
-                                                                                                        setCountryOpen(
-                                                                                                            false,
-                                                                                                        );
-                                                                                                    }}
-                                                                                                >
-                                                                                                    Other
-                                                                                                    <Check
-                                                                                                        className={cn(
-                                                                                                            'ml-auto h-4 w-4',
-                                                                                                            countryOther
-                                                                                                                ? 'opacity-100'
-                                                                                                                : 'opacity-0',
-                                                                                                        )}
-                                                                                                    />
-                                                                                                </CommandItem>
-                                                                                            </CommandGroup>
-                                                                                        </CommandList>
-                                                                                    </Command>
-                                                                                </PopoverContent>
-                                                                            </Popover>
-                                                                            {countryOther ? (
-                                                                                <Input
-                                                                                    value={
-                                                                                        countryOther ===
-                                                                                        'Other'
-                                                                                            ? ''
-                                                                                            : countryOther
-                                                                                    }
-                                                                                    onChange={(
-                                                                                        event,
-                                                                                    ) => {
-                                                                                        setCountryOther(
-                                                                                            event
-                                                                                                .target
-                                                                                                .value,
-                                                                                        );
-                                                                                        setDynamicValue(
-                                                                                            programme.id,
-                                                                                            field.id,
-                                                                                            event
-                                                                                                .target
-                                                                                                .value
-                                                                                                ? `Other: ${event.target.value}`
-                                                                                                : 'Other',
-                                                                                        );
-                                                                                    }}
-                                                                                    placeholder="Please specify country"
-                                                                                    className={
-                                                                                        inputClass
-                                                                                    }
-                                                                                />
-                                                                            ) : null}
-                                                                            <InputError
-                                                                                message={
-                                                                                    fieldError
-                                                                                }
-                                                                            />
-                                                                        </div>
-                                                                    );
-                                                                }
-
-                                                                return (
-                                                                    <div
-                                                                        key={
-                                                                            field.id
-                                                                        }
-                                                                        data-error-key={
-                                                                            fieldErrorKey
-                                                                        }
-                                                                        className="grid gap-2"
-                                                                    >
-                                                                        <Label>
-                                                                            {
-                                                                                field.label
-                                                                            }
-                                                                            {field.is_required ? (
-                                                                                <span className="text-[11px] font-semibold text-red-600">
-                                                                                    {' '}
-                                                                                    *
-                                                                                </span>
-                                                                            ) : null}
-                                                                        </Label>
-
-                                                                        {field.field_type ===
-                                                                        'textarea' ? (
-                                                                            <textarea
-                                                                                value={
-                                                                                    stringValue
-                                                                                }
-                                                                                onChange={(
-                                                                                    event,
-                                                                                ) =>
-                                                                                    setDynamicValue(
-                                                                                        programme.id,
-                                                                                        field.id,
-                                                                                        event
-                                                                                            .target
-                                                                                            .value,
-                                                                                    )
-                                                                                }
-                                                                                placeholder={
-                                                                                    field.placeholder ??
-                                                                                    undefined
-                                                                                }
-                                                                                className={cn(
-                                                                                    inputClass,
-                                                                                    'min-h-[96px] py-2',
-                                                                                )}
-                                                                            />
-                                                                        ) : null}
-
-                                                                        {[
-                                                                            'text',
-                                                                            'email',
-                                                                            'tel',
-                                                                            'date',
-                                                                        ].includes(
-                                                                            field.field_type,
-                                                                        ) ? (
-                                                                            <Input
-                                                                                type={
-                                                                                    field.field_type ===
-                                                                                    'tel'
-                                                                                        ? 'tel'
-                                                                                        : field.field_type
-                                                                                }
-                                                                                value={
-                                                                                    stringValue
-                                                                                }
-                                                                                onChange={(
-                                                                                    event,
-                                                                                ) =>
-                                                                                    setDynamicValue(
-                                                                                        programme.id,
-                                                                                        field.id,
-                                                                                        event
-                                                                                            .target
-                                                                                            .value,
-                                                                                    )
-                                                                                }
-                                                                                placeholder={
-                                                                                    field.placeholder ??
-                                                                                    undefined
-                                                                                }
-                                                                                className={
-                                                                                    inputClass
-                                                                                }
-                                                                            />
-                                                                        ) : null}
-
-                                                                        {isAsemme10ConsentField ? (
-                                                                            <label className="flex items-start gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm">
-                                                                                <Checkbox
-                                                                                    checked={
-                                                                                        !!stringValue
-                                                                                    }
-                                                                                    onCheckedChange={(
-                                                                                        checked,
-                                                                                    ) =>
-                                                                                        setDynamicValue(
-                                                                                            programme.id,
-                                                                                            field.id,
-                                                                                            checked
-                                                                                                ? (field
-                                                                                                      .options?.[0] ??
-                                                                                                      'Yes')
-                                                                                                : '',
-                                                                                        )
-                                                                                    }
-                                                                                />
-                                                                                <span>
-                                                                                    {field
-                                                                                        .options?.[0] ??
-                                                                                        'Yes'}
-                                                                                </span>
-                                                                            </label>
-                                                                        ) : null}
-
-                                                                        {field.field_type ===
-                                                                            'radio' &&
-                                                                        !isAsemme10ConsentField ? (
-                                                                            <div className="grid gap-2 sm:grid-cols-2">
-                                                                                {(
-                                                                                    field.options ??
-                                                                                    []
-                                                                                ).map(
-                                                                                    (
-                                                                                        option,
-                                                                                    ) => (
-                                                                                        <label
-                                                                                            key={
-                                                                                                option
-                                                                                            }
-                                                                                            className="flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm"
-                                                                                        >
-                                                                                            <input
-                                                                                                type="radio"
-                                                                                                name={`dynamic-${programme.id}-${field.id}`}
-                                                                                                checked={
-                                                                                                    stringValue ===
-                                                                                                    option
-                                                                                                }
-                                                                                                onChange={() =>
-                                                                                                    setDynamicValue(
-                                                                                                        programme.id,
-                                                                                                        field.id,
-                                                                                                        option,
-                                                                                                    )
-                                                                                                }
-                                                                                            />
-                                                                                            <span>
-                                                                                                {
-                                                                                                    option
-                                                                                                }
-                                                                                            </span>
-                                                                                        </label>
-                                                                                    ),
-                                                                                )}
-                                                                            </div>
-                                                                        ) : null}
-
-                                                                        {field.field_type ===
-                                                                        'checkbox' ? (
-                                                                            <div className="grid gap-2 sm:grid-cols-2">
-                                                                                {(
-                                                                                    field.options ??
-                                                                                    []
-                                                                                ).map(
-                                                                                    (
-                                                                                        option,
-                                                                                    ) => {
-                                                                                        const checkedValues =
-                                                                                            Array.isArray(
-                                                                                                value,
-                                                                                            )
-                                                                                                ? value
-                                                                                                : [];
-
-                                                                                        return (
-                                                                                            <label
-                                                                                                key={
-                                                                                                    option
-                                                                                                }
-                                                                                                className="flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm"
-                                                                                            >
-                                                                                                <Checkbox
-                                                                                                    checked={checkedValues.includes(
-                                                                                                        option,
-                                                                                                    )}
-                                                                                                    onCheckedChange={(
-                                                                                                        checked,
-                                                                                                    ) =>
-                                                                                                        toggleDynamicCheckbox(
-                                                                                                            programme.id,
-                                                                                                            field.id,
-                                                                                                            option,
-                                                                                                            Boolean(
-                                                                                                                checked,
+                                                                                                                    <span className="truncate">
+                                                                                                                        {
+                                                                                                                            item.name
+                                                                                                                        }
+                                                                                                                    </span>
+                                                                                                                    <Check
+                                                                                                                        className={cn(
+                                                                                                                            'ml-auto h-4 w-4',
+                                                                                                                            country ===
+                                                                                                                                String(
+                                                                                                                                    item.id,
+                                                                                                                                ) &&
+                                                                                                                                !countryOther
+                                                                                                                                ? 'opacity-100'
+                                                                                                                                : 'opacity-0',
+                                                                                                                        )}
+                                                                                                                    />
+                                                                                                                </CommandItem>
                                                                                                             ),
-                                                                                                        )
-                                                                                                    }
-                                                                                                />
-                                                                                                <span>
-                                                                                                    {
-                                                                                                        option
-                                                                                                    }
-                                                                                                </span>
-                                                                                            </label>
-                                                                                        );
-                                                                                    },
-                                                                                )}
-                                                                            </div>
-                                                                        ) : null}
-
-                                                                        {field.field_type ===
-                                                                        'select' ? (
-                                                                            <Popover
-                                                                                open={
-                                                                                    dynamicSelectOpen[
-                                                                                        `${programme.id}-${field.id}`
-                                                                                    ] ??
-                                                                                    false
-                                                                                }
-                                                                                onOpenChange={(
-                                                                                    open,
-                                                                                ) =>
-                                                                                    setDynamicSelectOpen(
-                                                                                        (
-                                                                                            current,
-                                                                                        ) => ({
-                                                                                            ...current,
-                                                                                            [`${programme.id}-${field.id}`]:
-                                                                                                open,
-                                                                                        }),
-                                                                                    )
-                                                                                }
-                                                                            >
-                                                                                <PopoverTrigger
-                                                                                    asChild
-                                                                                >
-                                                                                    <Button
-                                                                                        type="button"
-                                                                                        variant="outline"
-                                                                                        role="combobox"
-                                                                                        className={
-                                                                                            comboboxTriggerClass
-                                                                                        }
-                                                                                    >
-                                                                                        <span className="truncate">
-                                                                                            {stringValue ||
-                                                                                                field.placeholder ||
-                                                                                                'Select an option...'}
-                                                                                        </span>
-                                                                                        <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-                                                                                    </Button>
-                                                                                </PopoverTrigger>
-                                                                                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                                                                                    <Command>
-                                                                                        <CommandInput placeholder="Search options..." />
-                                                                                        <CommandList>
-                                                                                            <CommandEmpty>
-                                                                                                No
-                                                                                                option
-                                                                                                found.
-                                                                                            </CommandEmpty>
-                                                                                            <CommandGroup>
-                                                                                                {(
-                                                                                                    field.options ??
-                                                                                                    []
-                                                                                                ).map(
-                                                                                                    (
-                                                                                                        option,
-                                                                                                    ) => (
+                                                                                                        )}
+                                                                                                    </CommandGroup>
+                                                                                                    {groupedCountries
+                                                                                                        .nonAsean
+                                                                                                        .length >
+                                                                                                    0 ? (
+                                                                                                        <CommandGroup heading="Non-ASEAN Countries">
+                                                                                                            {groupedCountries.nonAsean.map(
+                                                                                                                (
+                                                                                                                    item,
+                                                                                                                ) => (
+                                                                                                                    <CommandItem
+                                                                                                                        key={
+                                                                                                                            item.id
+                                                                                                                        }
+                                                                                                                        value={`${item.name} ${item.code}`}
+                                                                                                                        onSelect={() => {
+                                                                                                                            setCountry(
+                                                                                                                                String(
+                                                                                                                                    item.id,
+                                                                                                                                ),
+                                                                                                                            );
+                                                                                                                            setCountryOther(
+                                                                                                                                '',
+                                                                                                                            );
+                                                                                                                            setDynamicValue(
+                                                                                                                                programme.id,
+                                                                                                                                field.id,
+                                                                                                                                item.name,
+                                                                                                                            );
+                                                                                                                            setCountryOpen(
+                                                                                                                                false,
+                                                                                                                            );
+                                                                                                                        }}
+                                                                                                                        className="gap-2"
+                                                                                                                    >
+                                                                                                                        {item.flag_url ? (
+                                                                                                                            <img
+                                                                                                                                src={
+                                                                                                                                    item.flag_url
+                                                                                                                                }
+                                                                                                                                alt=""
+                                                                                                                                className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-cover"
+                                                                                                                                loading="lazy"
+                                                                                                                                draggable={
+                                                                                                                                    false
+                                                                                                                                }
+                                                                                                                            />
+                                                                                                                        ) : (
+                                                                                                                            <span className="grid h-6 w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] text-slate-400">
+                                                                                                                                {
+                                                                                                                                    item.code
+                                                                                                                                }
+                                                                                                                            </span>
+                                                                                                                        )}
+                                                                                                                        <span className="truncate">
+                                                                                                                            {
+                                                                                                                                item.name
+                                                                                                                            }
+                                                                                                                        </span>
+                                                                                                                        <Check
+                                                                                                                            className={cn(
+                                                                                                                                'ml-auto h-4 w-4',
+                                                                                                                                country ===
+                                                                                                                                    String(
+                                                                                                                                        item.id,
+                                                                                                                                    ) &&
+                                                                                                                                    !countryOther
+                                                                                                                                    ? 'opacity-100'
+                                                                                                                                    : 'opacity-0',
+                                                                                                                            )}
+                                                                                                                        />
+                                                                                                                    </CommandItem>
+                                                                                                                ),
+                                                                                                            )}
+                                                                                                        </CommandGroup>
+                                                                                                    ) : null}
+                                                                                                    <CommandGroup heading="Other">
                                                                                                         <CommandItem
-                                                                                                            key={
-                                                                                                                option
-                                                                                                            }
-                                                                                                            value={
-                                                                                                                option
-                                                                                                            }
+                                                                                                            value="Other country"
                                                                                                             onSelect={() => {
+                                                                                                                setCountry(
+                                                                                                                    '',
+                                                                                                                );
+                                                                                                                setCountryOther(
+                                                                                                                    'Other',
+                                                                                                                );
                                                                                                                 setDynamicValue(
                                                                                                                     programme.id,
                                                                                                                     field.id,
-                                                                                                                    option,
+                                                                                                                    'Other',
                                                                                                                 );
-                                                                                                                setDynamicSelectOpen(
-                                                                                                                    (
-                                                                                                                        current,
-                                                                                                                    ) => ({
-                                                                                                                        ...current,
-                                                                                                                        [`${programme.id}-${field.id}`]: false,
-                                                                                                                    }),
+                                                                                                                setCountryOpen(
+                                                                                                                    false,
                                                                                                                 );
                                                                                                             }}
                                                                                                         >
+                                                                                                            Other
                                                                                                             <Check
                                                                                                                 className={cn(
-                                                                                                                    'mr-2 h-4 w-4',
-                                                                                                                    stringValue ===
-                                                                                                                        option
+                                                                                                                    'ml-auto h-4 w-4',
+                                                                                                                    countryOther
                                                                                                                         ? 'opacity-100'
                                                                                                                         : 'opacity-0',
                                                                                                                 )}
                                                                                                             />
+                                                                                                        </CommandItem>
+                                                                                                    </CommandGroup>
+                                                                                                </CommandList>
+                                                                                            </Command>
+                                                                                        </PopoverContent>
+                                                                                    </Popover>
+                                                                                    {countryOther ? (
+                                                                                        <Input
+                                                                                            value={
+                                                                                                countryOther ===
+                                                                                                'Other'
+                                                                                                    ? ''
+                                                                                                    : countryOther
+                                                                                            }
+                                                                                            onChange={(
+                                                                                                event,
+                                                                                            ) => {
+                                                                                                setCountryOther(
+                                                                                                    event
+                                                                                                        .target
+                                                                                                        .value,
+                                                                                                );
+                                                                                                setDynamicValue(
+                                                                                                    programme.id,
+                                                                                                    field.id,
+                                                                                                    event
+                                                                                                        .target
+                                                                                                        .value
+                                                                                                        ? `Other: ${event.target.value}`
+                                                                                                        : 'Other',
+                                                                                                );
+                                                                                            }}
+                                                                                            placeholder="Please specify country"
+                                                                                            className={
+                                                                                                inputClass
+                                                                                            }
+                                                                                        />
+                                                                                    ) : null}
+                                                                                    <InputError
+                                                                                        message={
+                                                                                            fieldError
+                                                                                        }
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        }
+
+                                                                        return (
+                                                                            <div
+                                                                                key={
+                                                                                    field.id
+                                                                                }
+                                                                                data-error-key={
+                                                                                    fieldErrorKey
+                                                                                }
+                                                                                className="grid gap-2"
+                                                                            >
+                                                                                <Label>
+                                                                                    {
+                                                                                        field.label
+                                                                                    }
+                                                                                    {field.is_required ? (
+                                                                                        <span className="text-[11px] font-semibold text-red-600">
+                                                                                            {' '}
+                                                                                            *
+                                                                                        </span>
+                                                                                    ) : null}
+                                                                                </Label>
+
+                                                                                {field.field_type ===
+                                                                                'textarea' ? (
+                                                                                    <textarea
+                                                                                        name={`registration_responses[${programme.id}][${field.id}]`}
+                                                                                        value={
+                                                                                            stringValue
+                                                                                        }
+                                                                                        onChange={(
+                                                                                            event,
+                                                                                        ) =>
+                                                                                            setDynamicValue(
+                                                                                                programme.id,
+                                                                                                field.id,
+                                                                                                event
+                                                                                                    .target
+                                                                                                    .value,
+                                                                                            )
+                                                                                        }
+                                                                                        placeholder={
+                                                                                            field.placeholder ??
+                                                                                            undefined
+                                                                                        }
+                                                                                        className={cn(
+                                                                                            inputClass,
+                                                                                            'min-h-[96px] py-2',
+                                                                                        )}
+                                                                                    />
+                                                                                ) : null}
+
+                                                                                {[
+                                                                                    'text',
+                                                                                    'email',
+                                                                                    'tel',
+                                                                                    'date',
+                                                                                ].includes(
+                                                                                    field.field_type,
+                                                                                ) ? (
+                                                                                    <Input
+                                                                                        name={`registration_responses[${programme.id}][${field.id}]`}
+                                                                                        type={
+                                                                                            field.field_type ===
+                                                                                            'tel'
+                                                                                                ? 'tel'
+                                                                                                : field.field_type
+                                                                                        }
+                                                                                        value={
+                                                                                            stringValue
+                                                                                        }
+                                                                                        onChange={(
+                                                                                            event,
+                                                                                        ) =>
+                                                                                            setDynamicValue(
+                                                                                                programme.id,
+                                                                                                field.id,
+                                                                                                event
+                                                                                                    .target
+                                                                                                    .value,
+                                                                                            )
+                                                                                        }
+                                                                                        placeholder={
+                                                                                            field.placeholder ??
+                                                                                            undefined
+                                                                                        }
+                                                                                        className={
+                                                                                            inputClass
+                                                                                        }
+                                                                                    />
+                                                                                ) : null}
+
+                                                                                {isAsemme10ConsentField ? (
+                                                                                    <label className="flex items-start gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm">
+                                                                                        <Checkbox
+                                                                                            checked={
+                                                                                                !!stringValue
+                                                                                            }
+                                                                                            onCheckedChange={(
+                                                                                                checked,
+                                                                                            ) =>
+                                                                                                setDynamicValue(
+                                                                                                    programme.id,
+                                                                                                    field.id,
+                                                                                                    checked
+                                                                                                        ? (field
+                                                                                                              .options?.[0] ??
+                                                                                                              'Yes')
+                                                                                                        : '',
+                                                                                                )
+                                                                                            }
+                                                                                        />
+                                                                                        <span>
+                                                                                            {field
+                                                                                                .options?.[0] ??
+                                                                                                'Yes'}
+                                                                                        </span>
+                                                                                    </label>
+                                                                                ) : null}
+
+                                                                                {field.field_type ===
+                                                                                    'radio' &&
+                                                                                !isAsemme10ConsentField ? (
+                                                                                    <div className="grid gap-2 sm:grid-cols-2">
+                                                                                        {(
+                                                                                            field.options ??
+                                                                                            []
+                                                                                        ).map(
+                                                                                            (
+                                                                                                option,
+                                                                                            ) => (
+                                                                                                <label
+                                                                                                    key={
+                                                                                                        option
+                                                                                                    }
+                                                                                                    className="flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm"
+                                                                                                >
+                                                                                                    <input
+                                                                                                        type="radio"
+                                                                                                        name={`dynamic-${programme.id}-${field.id}`}
+                                                                                                        checked={
+                                                                                                            stringValue ===
+                                                                                                            option
+                                                                                                        }
+                                                                                                        onChange={() =>
+                                                                                                            setDynamicValue(
+                                                                                                                programme.id,
+                                                                                                                field.id,
+                                                                                                                option,
+                                                                                                            )
+                                                                                                        }
+                                                                                                    />
+                                                                                                    <span>
+                                                                                                        {
+                                                                                                            option
+                                                                                                        }
+                                                                                                    </span>
+                                                                                                </label>
+                                                                                            ),
+                                                                                        )}
+                                                                                    </div>
+                                                                                ) : null}
+
+                                                                                {field.field_type ===
+                                                                                'checkbox' ? (
+                                                                                    <div className="grid gap-2 sm:grid-cols-2">
+                                                                                        {(
+                                                                                            field.options ??
+                                                                                            []
+                                                                                        ).map(
+                                                                                            (
+                                                                                                option,
+                                                                                            ) => {
+                                                                                                const checkedValues =
+                                                                                                    Array.isArray(
+                                                                                                        value,
+                                                                                                    )
+                                                                                                        ? value
+                                                                                                        : [];
+
+                                                                                                return (
+                                                                                                    <label
+                                                                                                        key={
+                                                                                                            option
+                                                                                                        }
+                                                                                                        className="flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm"
+                                                                                                    >
+                                                                                                        <Checkbox
+                                                                                                            checked={checkedValues.includes(
+                                                                                                                option,
+                                                                                                            )}
+                                                                                                            onCheckedChange={(
+                                                                                                                checked,
+                                                                                                            ) =>
+                                                                                                                toggleDynamicCheckbox(
+                                                                                                                    programme.id,
+                                                                                                                    field.id,
+                                                                                                                    option,
+                                                                                                                    Boolean(
+                                                                                                                        checked,
+                                                                                                                    ),
+                                                                                                                )
+                                                                                                            }
+                                                                                                        />
+                                                                                                        <span>
                                                                                                             {
                                                                                                                 option
                                                                                                             }
-                                                                                                        </CommandItem>
-                                                                                                    ),
-                                                                                                )}
-                                                                                            </CommandGroup>
-                                                                                        </CommandList>
-                                                                                    </Command>
-                                                                                </PopoverContent>
-                                                                            </Popover>
-                                                                        ) : null}
+                                                                                                        </span>
+                                                                                                    </label>
+                                                                                                );
+                                                                                            },
+                                                                                        )}
+                                                                                    </div>
+                                                                                ) : null}
 
-                                                                        {isAsemme10Registration &&
-                                                                        fieldOtherSelected ? (
-                                                                            <div
-                                                                                className="grid gap-2"
-                                                                                data-error-key={dynamicOtherErrorKey(
-                                                                                    programme.id,
-                                                                                    field.id,
-                                                                                )}
-                                                                            >
-                                                                                <Label>
-                                                                                    Please
-                                                                                    specify
-                                                                                </Label>
-                                                                                <Input
-                                                                                    value={
-                                                                                        otherValue
-                                                                                    }
-                                                                                    onChange={(
-                                                                                        event,
-                                                                                    ) =>
-                                                                                        setDynamicOtherValue(
+                                                                                {field.field_type ===
+                                                                                'select' ? (
+                                                                                    <Popover
+                                                                                        open={
+                                                                                            dynamicSelectOpen[
+                                                                                                `${programme.id}-${field.id}`
+                                                                                            ] ??
+                                                                                            false
+                                                                                        }
+                                                                                        onOpenChange={(
+                                                                                            open,
+                                                                                        ) =>
+                                                                                            setDynamicSelectOpen(
+                                                                                                (
+                                                                                                    current,
+                                                                                                ) => ({
+                                                                                                    ...current,
+                                                                                                    [`${programme.id}-${field.id}`]:
+                                                                                                        open,
+                                                                                                }),
+                                                                                            )
+                                                                                        }
+                                                                                    >
+                                                                                        <PopoverTrigger
+                                                                                            asChild
+                                                                                        >
+                                                                                            <Button
+                                                                                                type="button"
+                                                                                                variant="outline"
+                                                                                                role="combobox"
+                                                                                                className={
+                                                                                                    comboboxTriggerClass
+                                                                                                }
+                                                                                            >
+                                                                                                <span className="truncate">
+                                                                                                    {stringValue ||
+                                                                                                        field.placeholder ||
+                                                                                                        'Select an option...'}
+                                                                                                </span>
+                                                                                                <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                                                                                            </Button>
+                                                                                        </PopoverTrigger>
+                                                                                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                                                                                            <Command>
+                                                                                                <CommandInput placeholder="Search options..." />
+                                                                                                <CommandList>
+                                                                                                    <CommandEmpty>
+                                                                                                        No
+                                                                                                        option
+                                                                                                        found.
+                                                                                                    </CommandEmpty>
+                                                                                                    <CommandGroup>
+                                                                                                        {(
+                                                                                                            field.options ??
+                                                                                                            []
+                                                                                                        ).map(
+                                                                                                            (
+                                                                                                                option,
+                                                                                                            ) => (
+                                                                                                                <CommandItem
+                                                                                                                    key={
+                                                                                                                        option
+                                                                                                                    }
+                                                                                                                    value={
+                                                                                                                        option
+                                                                                                                    }
+                                                                                                                    onSelect={() => {
+                                                                                                                        setDynamicValue(
+                                                                                                                            programme.id,
+                                                                                                                            field.id,
+                                                                                                                            option,
+                                                                                                                        );
+                                                                                                                        setDynamicSelectOpen(
+                                                                                                                            (
+                                                                                                                                current,
+                                                                                                                            ) => ({
+                                                                                                                                ...current,
+                                                                                                                                [`${programme.id}-${field.id}`]: false,
+                                                                                                                            }),
+                                                                                                                        );
+                                                                                                                    }}
+                                                                                                                >
+                                                                                                                    <Check
+                                                                                                                        className={cn(
+                                                                                                                            'mr-2 h-4 w-4',
+                                                                                                                            stringValue ===
+                                                                                                                                option
+                                                                                                                                ? 'opacity-100'
+                                                                                                                                : 'opacity-0',
+                                                                                                                        )}
+                                                                                                                    />
+                                                                                                                    {
+                                                                                                                        option
+                                                                                                                    }
+                                                                                                                </CommandItem>
+                                                                                                            ),
+                                                                                                        )}
+                                                                                                    </CommandGroup>
+                                                                                                </CommandList>
+                                                                                            </Command>
+                                                                                        </PopoverContent>
+                                                                                    </Popover>
+                                                                                ) : null}
+
+                                                                                {isAsemme10Registration &&
+                                                                                fieldOtherSelected ? (
+                                                                                    <div
+                                                                                        className="grid gap-2"
+                                                                                        data-error-key={dynamicOtherErrorKey(
                                                                                             programme.id,
                                                                                             field.id,
-                                                                                            event
-                                                                                                .target
-                                                                                                .value,
-                                                                                        )
-                                                                                    }
-                                                                                    placeholder="Please specify"
-                                                                                    className={
-                                                                                        inputClass
-                                                                                    }
-                                                                                />
+                                                                                        )}
+                                                                                    >
+                                                                                        <Label>
+                                                                                            Please
+                                                                                            specify
+                                                                                        </Label>
+                                                                                        <Input
+                                                                                            value={
+                                                                                                otherValue
+                                                                                            }
+                                                                                            onChange={(
+                                                                                                event,
+                                                                                            ) =>
+                                                                                                setDynamicOtherValue(
+                                                                                                    programme.id,
+                                                                                                    field.id,
+                                                                                                    event
+                                                                                                        .target
+                                                                                                        .value,
+                                                                                                )
+                                                                                            }
+                                                                                            placeholder="Please specify"
+                                                                                            className={
+                                                                                                inputClass
+                                                                                            }
+                                                                                        />
+                                                                                        <InputError
+                                                                                            message={
+                                                                                                otherError
+                                                                                            }
+                                                                                        />
+                                                                                    </div>
+                                                                                ) : null}
+
+                                                                                {field.help_text ? (
+                                                                                    <p className="text-xs text-slate-500">
+                                                                                        {
+                                                                                            field.help_text
+                                                                                        }
+                                                                                    </p>
+                                                                                ) : null}
                                                                                 <InputError
                                                                                     message={
-                                                                                        otherError
+                                                                                        fieldError
                                                                                     }
                                                                                 />
                                                                             </div>
-                                                                        ) : null}
-
-                                                                        {field.help_text ? (
-                                                                            <p className="text-xs text-slate-500">
-                                                                                {
-                                                                                    field.help_text
-                                                                                }
-                                                                            </p>
-                                                                        ) : null}
-                                                                        <InputError
-                                                                            message={
-                                                                                fieldError
-                                                                            }
-                                                                        />
-                                                                    </div>
-                                                                );
-                                                            })}
+                                                                        );
+                                                                    },
+                                                                )}
                                                         </div>
                                                     </div>
                                                 ),
@@ -5487,7 +5864,10 @@ export default function Register({
                                 open={successOpen}
                                 onOpenChange={setSuccessOpen}
                             >
-                                <DialogContent className="w-[calc(100%-2rem)] max-w-4xl rounded-2xl border-none bg-white text-slate-900 sm:w-full">
+                                <DialogContent
+                                    className="max-h-[calc(100vh-1.5rem)] w-[calc(100%-2rem)] !max-w-2xl overflow-y-auto rounded-2xl border-none bg-white p-5 text-slate-900 sm:w-full sm:p-6"
+                                    style={{ colorScheme: 'light' }}
+                                >
                                     <DialogHeader className="items-center text-center">
                                         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0033A0] text-white shadow-lg shadow-[#0033A0]/20">
                                             <CheckCircle2 className="h-7 w-7" />
@@ -5515,7 +5895,7 @@ export default function Register({
                                     </DialogHeader>
 
                                     {asemme10Submission ? (
-                                        <div className="mx-auto w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                        <div className="mx-auto w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                                             <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
                                                 Registered participants
                                             </p>
@@ -5545,68 +5925,139 @@ export default function Register({
                                         </div>
                                     ) : null}
 
-                                    {registeredParticipant ? (
-                                        <div className="mx-auto w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                                            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                                <div className="bg-[#0033A0] px-5 py-4 text-white">
-                                                    <p className="text-xs font-semibold tracking-[0.18em] uppercase">
-                                                        Virtual Participant ID
-                                                    </p>
-                                                    <p className="mt-1 text-lg font-semibold">
-                                                        {registeredParticipant.event_title ??
-                                                            activeProgramme?.title ??
-                                                            'Registration Event'}
-                                                    </p>
-                                                </div>
-
-                                                <div className="grid gap-4 p-5 sm:grid-cols-[1fr_220px]">
-                                                    <div className="min-w-0">
-                                                        <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                                                            Participant
-                                                        </p>
-                                                        <p className="mt-1 text-2xl font-bold break-words text-slate-900">
-                                                            {
-                                                                registeredParticipant.name
-                                                            }
-                                                        </p>
-                                                        <p className="mt-2 text-sm break-words text-slate-600">
-                                                            {
-                                                                registeredParticipant.email
-                                                            }
-                                                        </p>
-
-                                                        <div className="mt-5 inline-flex rounded-lg border border-[#0033A0]/20 bg-[#0033A0]/5 px-3 py-2">
-                                                            <div>
-                                                                <p className="text-[11px] font-semibold tracking-wide text-[#0033A0] uppercase">
-                                                                    Participant
-                                                                    ID
-                                                                </p>
-                                                                <p className="text-lg font-bold text-[#0033A0]">
-                                                                    {
-                                                                        registeredParticipant.display_id
-                                                                    }
-                                                                </p>
-                                                            </div>
+                                    {virtualIdParticipant ? (
+                                        <div
+                                            className="mx-auto aspect-[1.62/1] w-full !max-w-[390px] overflow-hidden rounded-[16px] border border-sky-100 bg-sky-50 p-3 shadow-lg shadow-slate-200/70 sm:!max-w-[440px] sm:rounded-[18px] sm:p-3"
+                                            style={{
+                                                colorScheme: 'light',
+                                                backgroundImage:
+                                                    "linear-gradient(120deg, rgba(255,255,255,0.9), rgba(225,244,255,0.78), rgba(255,255,255,0.92)), url('/img/bg2.png')",
+                                                backgroundPosition: 'center',
+                                                backgroundSize: 'cover',
+                                            }}
+                                        >
+                                            <div className="grid h-full grid-cols-[minmax(0,1fr)_33%] gap-3">
+                                                <div className="flex min-w-0 flex-col">
+                                                    <div className="flex items-start gap-2">
+                                                        <img
+                                                            src="/img/asean_logo.png"
+                                                            alt="ASEAN"
+                                                            className="h-6 w-6 object-contain sm:h-7 sm:w-7"
+                                                        />
+                                                        <img
+                                                            src="/img/bagong_pilipinas.png"
+                                                            alt="Bagong Pilipinas"
+                                                            className="h-6 w-auto object-contain sm:h-7"
+                                                        />
+                                                        <div className="min-w-0">
+                                                            <p className="truncate text-[11px] font-bold text-slate-700 sm:text-sm">
+                                                                ASEAN
+                                                                Philippines 2026
+                                                            </p>
+                                                            <p className="truncate text-[10px] text-slate-500 sm:text-[11px]">
+                                                                {
+                                                                    virtualIdEventTitle
+                                                                }
+                                                            </p>
                                                         </div>
                                                     </div>
 
-                                                    <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3">
+                                                    <div className="mt-3 min-w-0 sm:mt-4">
+                                                        <p className="text-[10px] font-semibold tracking-wide text-slate-500 uppercase sm:text-[11px]">
+                                                            Participant
+                                                        </p>
+                                                        <p className="mt-0.5 line-clamp-2 text-lg leading-tight font-bold text-slate-950 sm:text-2xl">
+                                                            {
+                                                                virtualIdParticipant.name
+                                                            }
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="mt-2.5 flex min-w-0 items-center gap-2.5 sm:mt-3">
+                                                        <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-white shadow-sm sm:h-12 sm:w-12">
+                                                            {virtualIdFlagUrl ? (
+                                                                <img
+                                                                    src={
+                                                                        virtualIdFlagUrl
+                                                                    }
+                                                                    alt={
+                                                                        virtualIdCountryName
+                                                                    }
+                                                                    className="h-full w-full object-cover"
+                                                                />
+                                                            ) : (
+                                                                <span className="text-sm font-bold text-slate-500">
+                                                                    {
+                                                                        virtualIdCountryCode
+                                                                    }
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className="truncate text-base font-bold text-slate-900 sm:text-lg">
+                                                                {
+                                                                    virtualIdCountryName
+                                                                }
+                                                            </p>
+                                                            <p className="text-[11px] font-medium text-slate-500 sm:text-xs">
+                                                                {
+                                                                    virtualIdCountryCode
+                                                                }
+                                                            </p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="mt-auto pt-2">
+                                                        <p className="text-[10px] font-semibold tracking-wide text-slate-500 uppercase sm:text-[11px]">
+                                                            Participant ID
+                                                        </p>
+                                                        <div className="mt-1 inline-flex max-w-full rounded-full border border-slate-200 bg-white/90 px-2.5 py-1 shadow-sm">
+                                                            <p className="truncate text-[11px] font-bold text-slate-900 sm:text-xs">
+                                                                {
+                                                                    virtualIdParticipant.display_id
+                                                                }
+                                                            </p>
+                                                        </div>
+                                                        <p className="mt-2 hidden text-[10px] font-medium text-slate-500 sm:block">
+                                                            Scan QR for
+                                                            attendance
+                                                            verification.
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex min-w-0 items-center justify-center">
+                                                    <div className="flex h-full max-h-[94%] w-full flex-col items-center justify-center rounded-[16px] border border-slate-200/80 bg-white/90 p-2 shadow-md shadow-slate-200/80 sm:rounded-[18px]">
+                                                        <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold text-slate-600 sm:text-[11px]">
+                                                            <QrCode className="h-3 w-3" />
+                                                            QR Code
+                                                        </div>
                                                         {successQrDataUrl ? (
                                                             <img
                                                                 src={
                                                                     successQrDataUrl
                                                                 }
                                                                 alt="Participant QR code"
-                                                                className="h-44 w-44 bg-white"
+                                                                className="aspect-square w-full max-w-[104px] bg-white sm:max-w-[124px]"
                                                             />
                                                         ) : (
-                                                            <div className="grid h-44 w-44 place-items-center bg-white text-sm text-slate-500">
+                                                            <div className="grid aspect-square w-full max-w-[104px] place-items-center bg-white text-center text-[10px] text-slate-500 sm:max-w-[124px]">
                                                                 Generating QR...
                                                             </div>
                                                         )}
-                                                        <p className="mt-2 text-center text-xs font-medium text-slate-500">
-                                                            Present this at
-                                                            check-in.
+                                                        <p className="mt-1.5 line-clamp-2 max-w-full text-center text-[8px] font-bold text-slate-700 sm:text-[9px]">
+                                                            {
+                                                                virtualIdCountryCode
+                                                            }{' '}
+                                                            -{' '}
+                                                            {
+                                                                virtualIdParticipant.name
+                                                            }
+                                                        </p>
+                                                        <p className="mt-0.5 max-w-full truncate text-center text-[8px] font-medium text-slate-500 sm:text-[9px]">
+                                                            {
+                                                                virtualIdParticipant.display_id
+                                                            }
                                                         </p>
                                                     </div>
                                                 </div>
@@ -5614,8 +6065,8 @@ export default function Register({
                                         </div>
                                     ) : null}
 
-                                    <DialogFooter className="gap-2 sm:justify-center">
-                                        {registeredParticipant ? (
+                                    <DialogFooter className="relative z-10 mt-1 gap-2 bg-white pt-1 sm:mt-2 sm:justify-center">
+                                        {virtualIdParticipant ? (
                                             <Button
                                                 type="button"
                                                 variant="outline"

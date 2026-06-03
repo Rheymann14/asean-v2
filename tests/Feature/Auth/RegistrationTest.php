@@ -383,3 +383,90 @@ test('ASEMME10 delegation registration creates scannable participants', function
         expect($participant->joinedProgrammes()->whereKey($programme->id)->exists())->toBeTrue();
     }
 });
+
+test('ASEMME10 registration rejects attendee email already joined to selected event', function () {
+    Mail::fake();
+
+    $adminType = UserType::query()->create([
+        'name' => 'ADMIN',
+        'slug' => 'ADMIN',
+        'is_active' => true,
+    ]);
+
+    $country = Country::query()->create([
+        'code' => 'PHL',
+        'name' => 'Philippines',
+        'is_active' => true,
+    ]);
+
+    UserType::query()->create([
+        'name' => 'Government Official',
+        'slug' => 'government-official',
+        'is_active' => true,
+    ]);
+
+    $admin = User::factory()->create([
+        'user_type_id' => $adminType->id,
+    ]);
+    $owner = User::factory()->create();
+    $programme = Programme::query()->create([
+        'user_id' => $owner->id,
+        'tag' => 'ASEMME10',
+        'title' => '10th Asia-Europe Meeting of Ministers for Education (ASEMME10)',
+        'description' => 'ASEMME10 registration',
+        'starts_at' => now()->addMonth(),
+        'ends_at' => now()->addMonth()->addDays(2),
+        'location' => 'Manila',
+        'is_active' => true,
+    ]);
+
+    $existingUser = User::factory()->create([
+        'email' => 'maria.santos@example.test',
+        'country_id' => $country->id,
+    ]);
+    $existingUser->joinedProgrammes()->attach($programme->id);
+
+    $response = $this->actingAs($admin)->post(route('participants.asemme10-registration.store'), [
+        'programme_id' => $programme->id,
+        'country_id' => $country->id,
+        'registration_type' => 'Country Delegation',
+        'focal' => [
+            'name' => 'CHED LO',
+            'email' => 'focal@example.test',
+            'phone' => '+639171234567',
+            'organization' => 'CHED',
+            'position' => 'Focal',
+        ],
+        'consents' => [
+            'data_collection' => true,
+            'data_storage' => true,
+            'photo_video' => true,
+        ],
+        'delegation' => [
+            'minister_responsibility_type' => 'Minister responsible for Higher Education',
+            'speech_topic' => 'No speech wanted',
+            'social_activities' => ['Gala Dinner on 25 November'],
+        ],
+        'attendees' => [
+            [
+                'role' => 'head',
+                'title' => 'Ms',
+                'given_name' => 'Maria',
+                'family_name' => 'Santos',
+                'badge_name' => 'M. Santos',
+                'organization_name' => 'Department of Education',
+                'position_title' => 'Minister',
+                'email' => 'maria.santos@example.test',
+                'dietary_requirements' => 'Halal',
+                'mobility_or_special_needs' => '',
+            ],
+        ],
+    ]);
+
+    $response->assertInvalid([
+        'attendees.0.email' => 'This email is already registered for the selected event.',
+    ]);
+
+    expect(EventRegistrationSubmission::query()->count())->toBe(0);
+    expect(EventRegistrationAttendee::query()->count())->toBe(0);
+});
