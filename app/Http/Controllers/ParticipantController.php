@@ -11,6 +11,9 @@ use App\Models\User;
 use App\Models\UserType;
 use App\Services\WelcomeNotificationService;
 use App\Support\EventDefaults;
+use BaconQrCode\Common\ErrorCorrectionLevel;
+use BaconQrCode\Encoder\Encoder;
+use Dompdf\Cpdf;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -290,26 +293,26 @@ class ParticipantController extends Controller
                 });
         } else {
             $participantQuery = User::query()
-            ->with(['country', 'userType', 'joinedProgrammes:id,title'])
-            ->when($filters['search'] !== '', function ($query) use ($filters) {
-                $search = $filters['search'];
+                ->with(['country', 'userType', 'joinedProgrammes:id,title'])
+                ->when($filters['search'] !== '', function ($query) use ($filters) {
+                    $search = $filters['search'];
 
-                $query->where(function ($query) use ($search) {
-                    $query
-                        ->where('name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('contact_number', 'like', "%{$search}%")
-                        ->orWhereHas('country', fn ($countryQuery) => $countryQuery->where('name', 'like', "%{$search}%"))
-                        ->orWhereHas('userType', fn ($typeQuery) => $typeQuery->where('name', 'like', "%{$search}%"));
-                });
-            })
-            ->when($filters['country_id'] !== 'all' && is_numeric($filters['country_id']), fn ($query) => $query->where('country_id', (int) $filters['country_id']))
-            ->when($filters['user_type_id'] !== 'all' && is_numeric($filters['user_type_id']), fn ($query) => $query->where('user_type_id', (int) $filters['user_type_id']))
-            ->when(in_array($filters['status'], ['active', 'inactive'], true), fn ($query) => $query->where('is_active', $filters['status'] === 'active'))
-            ->when($filters['programme_id'] !== 'all' && is_numeric($filters['programme_id']), function ($query) use ($filters) {
-                $query->whereHas('joinedProgrammes', fn ($programmeQuery) => $programmeQuery->whereKey((int) $filters['programme_id']));
-            })
-            ->orderBy('name');
+                    $query->where(function ($query) use ($search) {
+                        $query
+                            ->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%")
+                            ->orWhere('contact_number', 'like', "%{$search}%")
+                            ->orWhereHas('country', fn ($countryQuery) => $countryQuery->where('name', 'like', "%{$search}%"))
+                            ->orWhereHas('userType', fn ($typeQuery) => $typeQuery->where('name', 'like', "%{$search}%"));
+                    });
+                })
+                ->when($filters['country_id'] !== 'all' && is_numeric($filters['country_id']), fn ($query) => $query->where('country_id', (int) $filters['country_id']))
+                ->when($filters['user_type_id'] !== 'all' && is_numeric($filters['user_type_id']), fn ($query) => $query->where('user_type_id', (int) $filters['user_type_id']))
+                ->when(in_array($filters['status'], ['active', 'inactive'], true), fn ($query) => $query->where('is_active', $filters['status'] === 'active'))
+                ->when($filters['programme_id'] !== 'all' && is_numeric($filters['programme_id']), function ($query) use ($filters) {
+                    $query->whereHas('joinedProgrammes', fn ($programmeQuery) => $programmeQuery->whereKey((int) $filters['programme_id']));
+                })
+                ->orderBy('name');
 
             $participantPaginator = $participantQuery
                 ->paginate($perPage)
@@ -351,77 +354,77 @@ class ParticipantController extends Controller
                     $attendanceEntries = $attendanceByUser->get($user->id, collect());
 
                     return [
-                    'id' => $user->id,
-                    'full_name' => $user->name,
-                    'display_id' => $user->display_id,
-                    'qr_payload' => $user->qr_payload,
-                    'profile_image_url' => $user->profile_photo_path ? asset($user->profile_photo_path) : null,
-                    'profile_photo_url' => $user->profile_photo_path ? asset($user->profile_photo_path) : null,
-                    'profile_photo_path' => $user->profile_photo_path,
-                    'email' => $user->email,
-                    'contact_number' => $user->contact_number,
-                    'contact_country_code' => $user->contact_country_code,
-                    'country_id' => $user->country_id,
-                    'user_type_id' => $user->user_type_id,
-                    'other_user_type' => $user->other_user_type,
-                    'honorific_title' => $user->honorific_title,
-                    'honorific_other' => $user->honorific_other,
-                    'given_name' => $user->given_name,
-                    'middle_name' => $user->middle_name,
-                    'family_name' => $user->family_name,
-                    'suffix' => $user->suffix,
-                    'sex_assigned_at_birth' => $user->sex_assigned_at_birth,
-                    'organization_name' => $user->organization_name,
-                    'position_title' => $user->position_title,
-                    'ip_affiliation' => $user->ip_affiliation,
-                    'ip_group_name' => $user->ip_group_name,
-                    'is_active' => $user->is_active,
-                    'consent_contact_sharing' => $user->consent_contact_sharing,
-                    'consent_photo_video' => $user->consent_photo_video,
-                    'has_food_restrictions' => $user->has_food_restrictions,
-                    'food_restrictions' => $user->food_restrictions ?? [],
-                    'dietary_allergies' => $user->dietary_allergies,
-                    'dietary_other' => $user->dietary_other,
-                    'accessibility_needs' => $user->accessibility_needs ?? [],
-                    'accessibility_other' => $user->accessibility_other,
-                    'emergency_contact_name' => $user->emergency_contact_name,
-                    'emergency_contact_relationship' => $user->emergency_contact_relationship,
-                    'emergency_contact_phone' => $user->emergency_contact_phone,
-                    'emergency_contact_email' => $user->emergency_contact_email,
-                    'created_at' => $user->created_at?->toISOString(),
-                    'joined_programme_ids' => $user->joinedProgrammes
-                        ? $user->joinedProgrammes->pluck('id')->values()->all()
-                        : [],
-                    'checked_in_programme_ids' => $attendanceEntries
-                        ->pluck('programme_id')
-                        ->values()
-                        ->all(),
-                    'checked_in_programmes' => $attendanceEntries
-                        ->map(fn (ParticipantAttendance $attendance) => [
-                            'programme_id' => $attendance->programme_id,
-                            'scanned_at' => $attendance->scanned_at?->toISOString(),
-                        ])
-                        ->values()
-                        ->all(),
-                    'registration_responses' => $responsesByUser->get($user->id, []),
-                    'country' => $user->country
-                        ? [
-                            'id' => $user->country->id,
-                            'code' => $user->country->code,
-                            'name' => $user->country->name,
-                            'is_active' => $user->country->is_active,
-                            'flag_url' => $user->country->flag_url,
-                        ]
-                        : null,
-                    'user_type' => $user->userType
-                        ? [
-                            'id' => $user->userType->id,
-                            'name' => $user->userType->name,
-                            'slug' => $user->userType->slug,
-                            'is_active' => $user->userType->is_active,
-                            'sequence_order' => $user->userType->sequence_order,
-                        ]
-                        : null,
+                        'id' => $user->id,
+                        'full_name' => $user->name,
+                        'display_id' => $user->display_id,
+                        'qr_payload' => $user->qr_payload,
+                        'profile_image_url' => $user->profile_photo_path ? asset($user->profile_photo_path) : null,
+                        'profile_photo_url' => $user->profile_photo_path ? asset($user->profile_photo_path) : null,
+                        'profile_photo_path' => $user->profile_photo_path,
+                        'email' => $user->email,
+                        'contact_number' => $user->contact_number,
+                        'contact_country_code' => $user->contact_country_code,
+                        'country_id' => $user->country_id,
+                        'user_type_id' => $user->user_type_id,
+                        'other_user_type' => $user->other_user_type,
+                        'honorific_title' => $user->honorific_title,
+                        'honorific_other' => $user->honorific_other,
+                        'given_name' => $user->given_name,
+                        'middle_name' => $user->middle_name,
+                        'family_name' => $user->family_name,
+                        'suffix' => $user->suffix,
+                        'sex_assigned_at_birth' => $user->sex_assigned_at_birth,
+                        'organization_name' => $user->organization_name,
+                        'position_title' => $user->position_title,
+                        'ip_affiliation' => $user->ip_affiliation,
+                        'ip_group_name' => $user->ip_group_name,
+                        'is_active' => $user->is_active,
+                        'consent_contact_sharing' => $user->consent_contact_sharing,
+                        'consent_photo_video' => $user->consent_photo_video,
+                        'has_food_restrictions' => $user->has_food_restrictions,
+                        'food_restrictions' => $user->food_restrictions ?? [],
+                        'dietary_allergies' => $user->dietary_allergies,
+                        'dietary_other' => $user->dietary_other,
+                        'accessibility_needs' => $user->accessibility_needs ?? [],
+                        'accessibility_other' => $user->accessibility_other,
+                        'emergency_contact_name' => $user->emergency_contact_name,
+                        'emergency_contact_relationship' => $user->emergency_contact_relationship,
+                        'emergency_contact_phone' => $user->emergency_contact_phone,
+                        'emergency_contact_email' => $user->emergency_contact_email,
+                        'created_at' => $user->created_at?->toISOString(),
+                        'joined_programme_ids' => $user->joinedProgrammes
+                            ? $user->joinedProgrammes->pluck('id')->values()->all()
+                            : [],
+                        'checked_in_programme_ids' => $attendanceEntries
+                            ->pluck('programme_id')
+                            ->values()
+                            ->all(),
+                        'checked_in_programmes' => $attendanceEntries
+                            ->map(fn (ParticipantAttendance $attendance) => [
+                                'programme_id' => $attendance->programme_id,
+                                'scanned_at' => $attendance->scanned_at?->toISOString(),
+                            ])
+                            ->values()
+                            ->all(),
+                        'registration_responses' => $responsesByUser->get($user->id, []),
+                        'country' => $user->country
+                            ? [
+                                'id' => $user->country->id,
+                                'code' => $user->country->code,
+                                'name' => $user->country->name,
+                                'is_active' => $user->country->is_active,
+                                'flag_url' => $user->country->flag_url,
+                            ]
+                            : null,
+                        'user_type' => $user->userType
+                            ? [
+                                'id' => $user->userType->id,
+                                'name' => $user->userType->name,
+                                'slug' => $user->userType->slug,
+                                'is_active' => $user->userType->is_active,
+                                'sequence_order' => $user->userType->sequence_order,
+                            ]
+                            : null,
                     ];
                 });
         }
@@ -776,6 +779,68 @@ class ParticipantController extends Controller
         return back();
     }
 
+    public function downloadIdCardsPdf(Request $request)
+    {
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(120);
+
+        $validated = $request->validate([
+            'orientation' => ['required', Rule::in(['portrait', 'landscape'])],
+            'ids' => ['required', 'array', 'min:1', 'max:1000'],
+            'ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $ids = collect($validated['ids'])
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
+
+        $participantsById = User::query()
+            ->select([
+                'id',
+                'name',
+                'display_id',
+                'qr_payload',
+                'country_id',
+                'user_type_id',
+            ])
+            ->with([
+                'country:id,code,name',
+                'userType:id,name,slug',
+            ])
+            ->whereIn('id', $ids)
+            ->get()
+            ->keyBy('id');
+
+        $participants = $ids
+            ->map(fn ($id) => $participantsById->get($id))
+            ->filter()
+            ->map(fn (User $user) => [
+                'id' => $user->id,
+                'name' => $user->name ?: 'Participant',
+                'display_id' => $user->display_id ?: (string) $user->id,
+                'qr_payload' => $user->qr_payload ?: ($user->display_id ?: (string) $user->id),
+                'country_name' => $user->country?->name ?: '-',
+                'country_code' => $user->country?->code ? strtoupper($user->country->code) : '',
+                'type_name' => $user->userType?->name ?: '',
+                'flag_path' => $this->countryFlagJpegPath($user->country?->code, $user->country?->name),
+            ])
+            ->values();
+
+        $orientation = $validated['orientation'];
+        $filename = sprintf(
+            'participant-ids-%s-%s.pdf',
+            $orientation,
+            now()->format('Ymd-His'),
+        );
+
+        return response($this->buildIdCardsPdf($participants, $orientation), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ]);
+    }
+
     public function joinProgramme(Request $request, User $participant, Programme $programme)
     {
         $participant->joinedProgrammes()->syncWithoutDetaching([$programme->id]);
@@ -821,6 +886,444 @@ class ParticipantController extends Controller
         }
 
         return Str::lower((string) $userType->slug) === 'other' || Str::lower($userType->name) === 'other';
+    }
+
+    private function buildIdCardsPdf($participants, string $orientation): string
+    {
+        $isLandscape = $orientation === 'landscape';
+        $pageWidth = $isLandscape ? 841.89 : 595.28;
+        $pageHeight = $isLandscape ? 595.28 : 841.89;
+        $cardWidth = $isLandscape ? 242.64 : 223.2;
+        $cardHeight = $isLandscape ? 153.0 : 363.6;
+        $columns = $isLandscape ? 3 : 2;
+        $perPage = $isLandscape ? 9 : 4;
+        $margin = 18.0;
+        $gap = 8.0;
+
+        $pdf = new Cpdf([0, 0, $pageWidth, $pageHeight], false);
+        $pdf->selectFont(base_path('vendor/dompdf/dompdf/lib/fonts/Helvetica.afm'));
+        $pdf->setLineStyle(0.6);
+        $assets = [
+            'background' => public_path('img/id-card-bg.jpg'),
+            'asean_logo' => public_path('img/id-card-asean-logo.jpg'),
+            'bagong_logo' => public_path('img/id-card-bagong-pilipinas-logo.jpg'),
+        ];
+
+        foreach ($assets as $key => $path) {
+            if (! File::exists($path)) {
+                $assets[$key] = null;
+            }
+        }
+
+        foreach ($participants->values() as $index => $participant) {
+            if ($index > 0 && $index % $perPage === 0) {
+                $pdf->newPage();
+            }
+
+            $slot = $index % $perPage;
+            $column = $slot % $columns;
+            $row = intdiv($slot, $columns);
+            $x = $margin + ($column * ($cardWidth + $gap));
+            $top = $margin + ($row * ($cardHeight + $gap));
+            $y = $pageHeight - $top - $cardHeight;
+
+            $this->drawIdCard($pdf, $participant, $x, $y, $cardWidth, $cardHeight, $isLandscape, $assets);
+        }
+
+        return $pdf->output();
+    }
+
+    private function drawIdCard(
+        Cpdf $pdf,
+        array $participant,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+        bool $isLandscape,
+        array $assets
+    ): void {
+        $top = $y + $height;
+        $pad = $isLandscape ? 9.0 : 14.0;
+        $radius = $isLandscape ? 13.0 : 16.0;
+
+        $pdf->setColor([1, 1, 1]);
+        $this->filledRoundedRectangle($pdf, $x, $y, $width, $height, $radius);
+
+        $pdf->clippingRectangleRounded($x, $y, $width, $height, $radius, $radius, $radius, $radius);
+        if ($assets['background']) {
+            $this->drawJpegCover($pdf, $assets['background'], $x, $y, $width, $height);
+        } else {
+            $pdf->setColor([0.90, 0.97, 1.0]);
+            $pdf->filledRectangle($x, $y, $width, $height);
+        }
+        $pdf->clippingEnd();
+
+        $pdf->setStrokeColor([0.80, 0.88, 0.95]);
+        $pdf->setLineStyle(0.7);
+        $this->roundedBorder($pdf, $x, $y, $width, $height, $radius);
+
+        $logoSize = $isLandscape ? 17.0 : 22.0;
+        $logoY = $top - $pad - $logoSize;
+        if ($assets['asean_logo']) {
+            $this->drawPdfImage($pdf, $assets['asean_logo'], $x + $pad, $logoY, $logoSize, $logoSize);
+        }
+        if ($assets['bagong_logo']) {
+            $this->drawPdfImage($pdf, $assets['bagong_logo'], $x + $pad + $logoSize + 5.0, $logoY, $logoSize, $logoSize);
+        }
+
+        $titleX = $x + $pad + ($logoSize * 2) + 16.0;
+        $titleLimit = $width - ($titleX - $x) - $pad;
+        $titleSize = $isLandscape ? 6.6 : 6.9;
+        $subtitleSize = $isLandscape ? 5.6 : 5.9;
+        $this->drawText($pdf, $this->limitPdfText('ASEAN Philippines 2026', $this->charsForWidth($titleLimit, $titleSize)), $titleX, $top - $pad - 8.0, $titleSize, [0.08, 0.20, 0.36]);
+        $this->drawText($pdf, 'Participant Identification', $titleX, $top - $pad - 18.6, $subtitleSize, [0.35, 0.43, 0.55]);
+
+        $pdf->setStrokeColor([0.82, 0.88, 0.96]);
+        $pdf->setLineStyle(0.5);
+        $pdf->line($x + $pad, $top - $pad - 29, $x + $width - $pad, $top - $pad - 29);
+
+        $name = $this->pdfText((string) $participant['name']);
+        $country = $this->pdfText((string) $participant['country_name']);
+        $countryCode = $this->pdfText((string) $participant['country_code']);
+        $type = $this->pdfText((string) $participant['type_name']);
+        $displayId = $this->pdfText((string) $participant['display_id']);
+        $qrPayload = (string) ($participant['qr_payload'] ?? $participant['display_id']);
+        $flagPath = $participant['flag_path'] ?? null;
+
+        $bodyTop = $top - $pad - 43.0;
+        $this->drawText($pdf, 'PARTICIPANT', $x + $pad, $bodyTop, $isLandscape ? 6.4 : 7.0, [0.39, 0.46, 0.57]);
+
+        if ($isLandscape) {
+            $qrPanelW = 84.0;
+            $qrPanelX = $x + $width - $pad - $qrPanelW;
+            $qrPanelY = $y + 16.0;
+            $qrPanelH = 100.0;
+            $leftLimit = $qrPanelX - $x - ($pad * 2) - 10.0;
+            $nameSize = $this->fitPdfFontSize($name, $leftLimit, 9.0, 7.0, 2);
+            $nameLineGap = $nameSize + 1.0;
+            $nameLines = $this->wrapPdfText($name, $this->charsForWidth($leftLimit, $nameSize), 2);
+            foreach ($nameLines as $lineIndex => $line) {
+                $this->drawText($pdf, $line, $x + $pad, $bodyTop - 14.0 - ($lineIndex * $nameLineGap), $nameSize, [0.02, 0.06, 0.16]);
+            }
+
+            $detailsY = $bodyTop - 39.0 - ((count($nameLines) - 1) * $nameLineGap);
+            $flagSize = 38.0;
+            if ($flagPath) {
+                $this->drawClippedJpeg($pdf, $flagPath, $x + $pad, $detailsY - 30.0, $flagSize, $flagSize, 7.0);
+            }
+            $detailX = $flagPath ? $x + $pad + $flagSize + 7.0 : $x + $pad;
+            $detailLimit = $leftLimit - ($flagPath ? $flagSize + 7.0 : 0.0);
+            $this->drawText($pdf, $this->limitPdfText($country, $this->charsForWidth($detailLimit, 8.0)), $detailX, $detailsY - 1.0, 8.0, [0.12, 0.18, 0.27]);
+            if ($countryCode !== '') {
+                $this->drawText($pdf, $this->limitPdfText($countryCode, $this->charsForWidth($detailLimit, 7.0)), $detailX, $detailsY - 13.0, 7.0, [0.39, 0.46, 0.57]);
+            }
+
+            $idLabelX = $flagPath ? $detailX : $x + $pad;
+            $idLabelLimit = $flagPath ? $detailLimit : $leftLimit;
+            $this->drawText($pdf, $this->limitPdfText('PARTICIPANT ID', $this->charsForWidth($idLabelLimit, 5.5)), $idLabelX, $y + 29.0, 5.5, [0.39, 0.46, 0.57]);
+            $idText = $this->limitPdfText($displayId, $this->charsForWidth($leftLimit - 12.0, 6.8));
+            $idWidth = min($leftLimit, max(58.0, strlen($idText) * 4.5 + 12.0));
+            $idBadgeY = $y + 4.6;
+            $idBadgeH = 16.5;
+            $this->filledRoundedRectangle($pdf, $x + $pad, $idBadgeY, $idWidth, $idBadgeH, 7.0);
+            $pdf->setStrokeColor([0.82, 0.88, 0.96]);
+            $this->roundedBorder($pdf, $x + $pad, $idBadgeY, $idWidth, $idBadgeH, 7.0);
+            $this->drawText($pdf, $idText, $x + $pad + 6.0, $idBadgeY + 5.7, 6.8, [0.02, 0.06, 0.16]);
+
+            $this->drawQrPanel($pdf, $displayId, $qrPayload, $qrPanelX, $qrPanelY, $qrPanelW, $qrPanelH, 54.0, true, $countryCode, $name);
+
+            return;
+        }
+
+        $leftLimit = $width - ($pad * 2);
+        $nameSize = $this->fitPdfFontSize($name, $leftLimit, 12.5, 9.0, 2);
+        $nameLineGap = $nameSize + 1.5;
+        $nameLines = $this->wrapPdfText($name, $this->charsForWidth($leftLimit, $nameSize), 2);
+        foreach ($nameLines as $lineIndex => $line) {
+            $this->drawText($pdf, $line, $x + $pad, $bodyTop - 17.0 - ($lineIndex * $nameLineGap), $nameSize, [0.02, 0.06, 0.16]);
+        }
+
+        $detailsY = $bodyTop - 54.0 - ((count($nameLines) - 1) * $nameLineGap);
+        $flagSize = 42.0;
+        if ($flagPath) {
+            $this->drawClippedJpeg($pdf, $flagPath, $x + $pad, $detailsY - 32.0, $flagSize, $flagSize, 8.0);
+        }
+        $detailX = $flagPath ? $x + $pad + $flagSize + 8.0 : $x + $pad;
+        $detailLimit = $leftLimit - ($flagPath ? $flagSize + 8.0 : 0.0);
+        $this->drawText($pdf, $this->limitPdfText($country, $this->charsForWidth($detailLimit, 10.8)), $detailX, $detailsY, 10.8, [0.12, 0.18, 0.27]);
+        if ($countryCode !== '') {
+            $this->drawText($pdf, $this->limitPdfText($countryCode, $this->charsForWidth($detailLimit, 9.0)), $detailX, $detailsY - 14.0, 9.0, [0.39, 0.46, 0.57]);
+        }
+        $idY = $detailsY - 64.0;
+        $this->drawText($pdf, 'PARTICIPANT ID', $x + $pad, $idY + 24.0, 6.5, [0.39, 0.46, 0.57]);
+        $idText = $this->limitPdfText($displayId, $this->charsForWidth($leftLimit - 12.0, 7.6));
+        $idWidth = min($leftLimit, max(68.0, strlen($idText) * 5.1 + 14.0));
+        $this->filledRoundedRectangle($pdf, $x + $pad, $idY, $idWidth, 20.0, 8.0);
+        $pdf->setStrokeColor([0.82, 0.88, 0.96]);
+        $this->roundedBorder($pdf, $x + $pad, $idY, $idWidth, 20.0, 8.0);
+        $this->drawText($pdf, $idText, $x + $pad + 7.0, $idY + 7.2, 7.6, [0.02, 0.06, 0.16]);
+
+        $qrPanelW = $width - ($pad * 2);
+        $qrPanelH = 128.0;
+        $qrPanelX = $x + $pad;
+        $qrPanelY = $y + 24.0;
+        $this->drawQrPanel($pdf, $displayId, $qrPayload, $qrPanelX, $qrPanelY, $qrPanelW, $qrPanelH, 80.0, false, $countryCode, $name);
+    }
+
+    private function drawQrPanel(
+        Cpdf $pdf,
+        string $displayId,
+        string $qrPayload,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+        float $qrSize,
+        bool $compact,
+        string $countryCode = '',
+        string $name = ''
+    ): void
+    {
+        $radius = $compact ? 11.0 : 15.0;
+        $this->filledRoundedRectangle($pdf, $x, $y, $width, $height, $radius);
+        $pdf->setStrokeColor([0.82, 0.88, 0.96]);
+        $this->roundedBorder($pdf, $x, $y, $width, $height, $radius);
+
+        $titleSize = $compact ? 5.8 : 6.8;
+        $this->drawCenteredText($pdf, 'QR Code', $x + ($width / 2), $y + $height - ($compact ? 12.0 : 13.0), $titleSize, [0.12, 0.18, 0.27]);
+
+        $qrX = $x + (($width - $qrSize) / 2);
+        $qrY = $y + ($compact ? 26.0 : 31.0);
+        $pdf->setColor([1, 1, 1]);
+        $pdf->filledRectangle($qrX, $qrY, $qrSize, $qrSize);
+        $this->drawQr($pdf, $qrPayload, $qrX + 3.0, $qrY + 3.0, $qrSize - 6.0);
+
+        $ownerText = trim(($countryCode !== '' ? $countryCode.' - ' : '').$name);
+        if ($ownerText !== '') {
+            $ownerSize = $compact ? 4.3 : 5.5;
+            $ownerY = $compact ? $y + 14.5 : $y + 17.0;
+            $ownerText = $this->limitPdfText($ownerText, $this->charsForWidth($width - 12.0, $ownerSize));
+            $this->drawCenteredText($pdf, $ownerText, $x + ($width / 2), $ownerY, $ownerSize, [0.12, 0.18, 0.27]);
+        }
+
+        $idSize = $compact ? 4.1 : 5.0;
+        $idY = $compact ? $y + 7.2 : $y + 8.5;
+        $idText = $this->limitPdfText($displayId, $this->charsForWidth($width - 12.0, $idSize));
+        $this->drawCenteredText($pdf, $idText, $x + ($width / 2), $idY, $idSize, [0.39, 0.46, 0.57]);
+    }
+
+    private function filledRoundedRectangle(Cpdf $pdf, float $x, float $y, float $width, float $height, float $radius): void
+    {
+        $radius = min($radius, $width / 2, $height / 2);
+        $pdf->setColor([1, 1, 1]);
+        $pdf->filledRectangle($x + $radius, $y, $width - ($radius * 2), $height);
+        $pdf->filledRectangle($x, $y + $radius, $width, $height - ($radius * 2));
+        $pdf->filledEllipse($x + $radius, $y + $radius, $radius);
+        $pdf->filledEllipse($x + $width - $radius, $y + $radius, $radius);
+        $pdf->filledEllipse($x + $radius, $y + $height - $radius, $radius);
+        $pdf->filledEllipse($x + $width - $radius, $y + $height - $radius, $radius);
+    }
+
+    private function roundedBorder(Cpdf $pdf, float $x, float $y, float $width, float $height, float $radius): void
+    {
+        $radius = min($radius, $width / 2, $height / 2);
+        $pdf->line($x + $radius, $y, $x + $width - $radius, $y);
+        $pdf->line($x + $radius, $y + $height, $x + $width - $radius, $y + $height);
+        $pdf->line($x, $y + $radius, $x, $y + $height - $radius);
+        $pdf->line($x + $width, $y + $radius, $x + $width, $y + $height - $radius);
+        $pdf->ellipse($x + $radius, $y + $radius, $radius, 0, 0, 8, 180, 270, false, false, true);
+        $pdf->ellipse($x + $width - $radius, $y + $radius, $radius, 0, 0, 8, 270, 360, false, false, true);
+        $pdf->ellipse($x + $width - $radius, $y + $height - $radius, $radius, 0, 0, 8, 0, 90, false, false, true);
+        $pdf->ellipse($x + $radius, $y + $height - $radius, $radius, 0, 0, 8, 90, 180, false, false, true);
+    }
+
+    private function drawClippedJpeg(Cpdf $pdf, string $path, float $x, float $y, float $width, float $height, float $radius): void
+    {
+        $pdf->clippingRectangleRounded($x, $y, $width, $height, $radius, $radius, $radius, $radius);
+        $this->drawJpegCover($pdf, $path, $x, $y, $width, $height);
+        $pdf->clippingEnd();
+        $pdf->setStrokeColor([0.82, 0.88, 0.96]);
+        $this->roundedBorder($pdf, $x, $y, $width, $height, $radius);
+    }
+
+    private function drawJpegCover(Cpdf $pdf, string $path, float $x, float $y, float $width, float $height): void
+    {
+        $imageSize = @getimagesize($path);
+        if (! $imageSize || empty($imageSize[0]) || empty($imageSize[1])) {
+            $pdf->addJpegFromFile($path, $x, $y, $width, $height);
+
+            return;
+        }
+
+        $imageRatio = $imageSize[0] / $imageSize[1];
+        $boxRatio = $width / $height;
+        if ($imageRatio > $boxRatio) {
+            $drawHeight = $height;
+            $drawWidth = $height * $imageRatio;
+            $drawX = $x - (($drawWidth - $width) / 2);
+            $drawY = $y;
+        } else {
+            $drawWidth = $width;
+            $drawHeight = $width / $imageRatio;
+            $drawX = $x;
+            $drawY = $y - (($drawHeight - $height) / 2);
+        }
+
+        $pdf->addJpegFromFile($path, $drawX, $drawY, $drawWidth, $drawHeight);
+    }
+
+    private function drawPdfImage(Cpdf $pdf, string $path, float $x, float $y, float $width, float $height): void
+    {
+        if (Str::lower(pathinfo($path, PATHINFO_EXTENSION)) === 'svg') {
+            $pdf->addSvgFromFile($path, $x, $y, $width, $height);
+
+            return;
+        }
+
+        $pdf->addJpegFromFile($path, $x, $y, $width, $height);
+    }
+
+    private function drawQr(Cpdf $pdf, string $payload, float $x, float $y, float $size): void
+    {
+        $matrix = Encoder::encode($payload, ErrorCorrectionLevel::M())->getMatrix();
+        $quietModules = 2;
+        $matrixSize = $matrix->getWidth();
+        $moduleSize = $size / ($matrixSize + ($quietModules * 2));
+        $originX = $x + ($quietModules * $moduleSize);
+        $originY = $y + $size - ($quietModules * $moduleSize);
+
+        $pdf->setColor([0, 0, 0]);
+
+        for ($row = 0; $row < $matrixSize; $row++) {
+            $runStart = null;
+
+            for ($column = 0; $column <= $matrixSize; $column++) {
+                $filled = $column < $matrixSize && $matrix->get($column, $row) === 1;
+
+                if ($filled && $runStart === null) {
+                    $runStart = $column;
+
+                    continue;
+                }
+
+                if ((! $filled || $column === $matrixSize) && $runStart !== null) {
+                    $runWidth = $column - $runStart;
+                    $pdf->filledRectangle(
+                        $originX + ($runStart * $moduleSize),
+                        $originY - (($row + 1) * $moduleSize),
+                        $runWidth * $moduleSize,
+                        $moduleSize
+                    );
+                    $runStart = null;
+                }
+            }
+        }
+    }
+
+    private function drawText(Cpdf $pdf, string $text, float $x, float $y, float $size, array $color): void
+    {
+        $pdf->setColor($color);
+        $pdf->addText($x, $y, $size, $text);
+    }
+
+    private function drawCenteredText(Cpdf $pdf, string $text, float $centerX, float $y, float $size, array $color): void
+    {
+        $this->drawText($pdf, $text, $centerX - ($this->pdfTextWidth($text, $size) / 2), $y, $size, $color);
+    }
+
+    private function pdfTextWidth(string $text, float $size): float
+    {
+        return strlen($text) * $size * 0.52;
+    }
+
+    private function wrapPdfText(string $text, int $lineLength, int $maxLines): array
+    {
+        $words = preg_split('/\s+/', trim($text)) ?: [];
+        $lines = [];
+        $current = '';
+
+        foreach ($words as $word) {
+            $candidate = $current === '' ? $word : $current.' '.$word;
+            if (strlen($candidate) <= $lineLength) {
+                $current = $candidate;
+
+                continue;
+            }
+
+            if ($current !== '') {
+                $lines[] = $current;
+            }
+            $current = $word;
+
+            if (count($lines) >= $maxLines) {
+                break;
+            }
+        }
+
+        if ($current !== '' && count($lines) < $maxLines) {
+            $lines[] = $current;
+        }
+
+        if (count($lines) === 0) {
+            return ['Participant'];
+        }
+
+        if (count($lines) === $maxLines) {
+            $last = array_key_last($lines);
+            $lines[$last] = $this->limitPdfText($lines[$last], $lineLength);
+        }
+
+        return $lines;
+    }
+
+    private function limitPdfText(string $text, int $length): string
+    {
+        if (strlen($text) <= $length) {
+            return $text;
+        }
+
+        return rtrim(substr($text, 0, max(0, $length - 3))).'...';
+    }
+
+    private function charsForWidth(float $width, float $fontSize): int
+    {
+        return max(4, (int) floor($width / max(1.0, $fontSize * 0.52)));
+    }
+
+    private function fitPdfFontSize(string $text, float $width, float $baseSize, float $minSize, int $maxLines = 1): float
+    {
+        $length = max(1, strlen(trim($text)));
+        $fittedSize = ($width * max(1, $maxLines)) / ($length * 0.52);
+
+        return max($minSize, min($baseSize, $fittedSize));
+    }
+
+    private function countryFlagJpegPath(?string $code, ?string $name): ?string
+    {
+        $code = Str::of((string) $code)->lower()->trim()->toString();
+        $slug = Str::of((string) $name)->lower()->slug('-')->toString();
+        $candidates = array_filter([
+            $code ? public_path("asean/{$code}.jpg") : null,
+            $code ? public_path("asean/{$code}.jpeg") : null,
+            $slug ? public_path("asean/{$slug}.jpg") : null,
+            $slug ? public_path("asean/{$slug}.jpeg") : null,
+        ]);
+
+        foreach ($candidates as $candidate) {
+            if (File::exists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function pdfText(string $text): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text) ?? '');
+
+        return preg_replace('/(?<=[A-Za-z])\?(?=[a-z]{2,})/', 'ñ', $text) ?? $text;
     }
 
     private function buildFullName(string $givenName, ?string $middleName, string $familyName, ?string $suffix): string

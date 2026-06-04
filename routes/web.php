@@ -1,34 +1,27 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Mail;
-use Inertia\Inertia;
-use Laravel\Fortify\Features;
+use App\Http\Controllers\Asemme10RegistrationController;
+use App\Http\Controllers\BrevoTestController;
+use App\Http\Controllers\ContactDetailController;
+use App\Http\Controllers\CountryController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\EventKitController;
+use App\Http\Controllers\FeedbackController;
+use App\Http\Controllers\IssuanceController;
 use App\Http\Controllers\ParticipantController;
 use App\Http\Controllers\ParticipantDashboardController;
-use App\Http\Controllers\CountryController;
-use App\Http\Controllers\UserTypeController;
-use App\Http\Controllers\IssuanceController;
-use App\Http\Controllers\ContactDetailController;
-use App\Http\Controllers\FeedbackController;
 use App\Http\Controllers\ProgrammeController;
+use App\Http\Controllers\ReportsController;
+use App\Http\Controllers\ScannerController;
+use App\Http\Controllers\TableAssignmentController;
+use App\Http\Controllers\TransportVehicleController;
+use App\Http\Controllers\UserTypeController;
+use App\Http\Controllers\VehicleAssignmentController;
 use App\Http\Controllers\VenueController;
 use App\Http\Controllers\VenueSectionController;
-use App\Http\Controllers\ScannerController;
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\ReportsController;
-use App\Http\Controllers\TableAssignmentController;
-use App\Http\Controllers\EventKitController;
-use App\Http\Controllers\VehicleAssignmentController;
-use App\Http\Controllers\TransportVehicleController;
-use App\Http\Controllers\Asemme10RegistrationController;
-
-
-use App\Http\Controllers\BrevoTestController;
-
-
-
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
+use Laravel\Fortify\Features;
 
 Route::get('/', function () {
     return Inertia::render('welcome', [
@@ -40,8 +33,6 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/admin/brevo-test', [BrevoTestController::class, 'index'])->name('brevo.test');
     Route::post('/admin/brevo-test/send', [BrevoTestController::class, 'send'])->name('brevo.test.send');
 });
-
-
 
 Route::post('/feedback', [FeedbackController::class, 'store'])->name('feedback.store');
 Route::post('/asemme10-registration', [Asemme10RegistrationController::class, 'store'])
@@ -62,43 +53,42 @@ Route::get('/event-kit/materials', [EventKitController::class, 'materials'])->na
 Route::post('/event-kit/select-programme', [EventKitController::class, 'selectProgramme'])->name('event-kit.select-programme');
 Route::post('/event-kit/reset', [EventKitController::class, 'reset'])->name('event-kit.reset');
 
-
 Route::get('/issuances', [IssuanceController::class, 'publicIndex'])->name('issuances');
 
-    Route::middleware(['auth'])->group(function () {
-        Route::get('table-assignment', [TableAssignmentController::class, 'index'])->name('table-assignment');
-        Route::get('table-assignment/create', [TableAssignmentController::class, 'create'])
-            ->middleware(['verified', 'role:ched_admin'])
-            ->name('table-assignment.create');
-        Route::get('table-assignment/assignment', [TableAssignmentController::class, 'assignment'])
-            ->middleware(['verified', 'role:ched_admin'])
-            ->name('table-assignment.assignment');
+Route::middleware(['auth'])->group(function () {
+    Route::get('table-assignment', [TableAssignmentController::class, 'index'])->name('table-assignment');
+    Route::get('table-assignment/create', [TableAssignmentController::class, 'create'])
+        ->middleware(['verified', 'role:ched_admin'])
+        ->name('table-assignment.create');
+    Route::get('table-assignment/assignment', [TableAssignmentController::class, 'assignment'])
+        ->middleware(['verified', 'role:ched_admin'])
+        ->name('table-assignment.assignment');
 
-        Route::get('vehicle-assignment', [VehicleAssignmentController::class, 'index'])->name('vehicle-assignment');
+    Route::get('vehicle-assignment', [VehicleAssignmentController::class, 'index'])->name('vehicle-assignment');
 
     Route::middleware(['role:participant'])->group(function () {
-            Route::get('participant-dashboard', function () {
-                return Inertia::render('participant-dashboard');
-            })->name('participant-dashboard');
-            Route::get('/participant-dashboard', [ParticipantDashboardController::class, 'show'])
-                ->name('participant.dashboard');
-            Route::patch('/participant-dashboard/preferences', [ParticipantDashboardController::class, 'updatePreferences'])
-                ->name('participant-dashboard.preferences.update');
-            Route::post('/participant-dashboard/welcome-dinner', [ParticipantDashboardController::class, 'updateWelcomeDinner'])
-                ->name('participant-dashboard.welcome-dinner.update');
-            Route::post('/participant-dashboard/photo', [ParticipantDashboardController::class, 'updatePhoto'])
-                ->name('participant-dashboard.photo.update');
-            Route::delete('/participant-dashboard/photo', [ParticipantDashboardController::class, 'destroyPhoto'])
-                ->name('participant-dashboard.photo.destroy');
-            Route::get('/event-list', [ProgrammeController::class, 'participantIndex'])
-                ->name('event-list');
-            Route::post('/event-list/{programme}/join', [ProgrammeController::class, 'join'])
-                ->name('event-list.join');
-            Route::delete('/event-list/{programme}/leave', [ProgrammeController::class, 'leave'])
-                ->name('event-list.leave');
-            Route::delete('/event-list/clear', [ProgrammeController::class, 'clearSelections'])
-                ->name('event-list.clear');
-        });
+        Route::get('participant-dashboard', function () {
+            return Inertia::render('participant-dashboard');
+        })->name('participant-dashboard');
+        Route::get('/participant-dashboard', [ParticipantDashboardController::class, 'show'])
+            ->name('participant.dashboard');
+        Route::patch('/participant-dashboard/preferences', [ParticipantDashboardController::class, 'updatePreferences'])
+            ->name('participant-dashboard.preferences.update');
+        Route::post('/participant-dashboard/welcome-dinner', [ParticipantDashboardController::class, 'updateWelcomeDinner'])
+            ->name('participant-dashboard.welcome-dinner.update');
+        Route::post('/participant-dashboard/photo', [ParticipantDashboardController::class, 'updatePhoto'])
+            ->name('participant-dashboard.photo.update');
+        Route::delete('/participant-dashboard/photo', [ParticipantDashboardController::class, 'destroyPhoto'])
+            ->name('participant-dashboard.photo.destroy');
+        Route::get('/event-list', [ProgrammeController::class, 'participantIndex'])
+            ->name('event-list');
+        Route::post('/event-list/{programme}/join', [ProgrammeController::class, 'join'])
+            ->name('event-list.join');
+        Route::delete('/event-list/{programme}/leave', [ProgrammeController::class, 'leave'])
+            ->name('event-list.leave');
+        Route::delete('/event-list/clear', [ProgrammeController::class, 'clearSelections'])
+            ->name('event-list.clear');
+    });
 
     Route::middleware(['verified', 'role:ched_admin'])->group(function () {
         Route::get('vehicle-management', [VehicleAssignmentController::class, 'managementIndex'])->name('vehicle-management');
@@ -137,6 +127,8 @@ Route::get('/issuances', [IssuanceController::class, 'publicIndex'])->name('issu
         Route::get('participant', [ParticipantController::class, 'index'])->name('participant');
 
         Route::resource('participants', ParticipantController::class)->only(['store', 'update', 'destroy']);
+        Route::post('participants/id-cards.pdf', [ParticipantController::class, 'downloadIdCardsPdf'])
+            ->name('participants.id-cards.pdf');
         Route::post('participants/asemme10-registration', [Asemme10RegistrationController::class, 'store'])
             ->name('participants.asemme10-registration.store');
         Route::post('participants/{participant}/programmes/{programme}', [ParticipantController::class, 'joinProgramme'])
@@ -179,7 +171,6 @@ Route::get('/issuances', [IssuanceController::class, 'publicIndex'])->name('issu
         Route::patch('programmes/{programme}/active-registration', [ProgrammeController::class, 'activateRegistration'])
             ->name('programmes.active-registration');
         Route::resource('programmes', ProgrammeController::class)->only(['store', 'update', 'destroy']);
-
 
         Route::get('scanner', [ScannerController::class, 'index'])->name('scanner');
         Route::post('scanner/scan', [ScannerController::class, 'scan'])->name('scanner.scan');

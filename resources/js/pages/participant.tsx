@@ -829,6 +829,61 @@ function FlagCell({ country }: { country: Country }) {
 
 type PrintOrientation = 'portrait' | 'landscape';
 
+type PrintJob = {
+    orientation: PrintOrientation;
+    participants: ParticipantRow[];
+};
+
+const QR_BATCH_SIZE = 24;
+const QR_DATA_URL_WIDTH = 192;
+
+const ID_CARDS_PDF_ENDPOINT = '/participants/id-cards.pdf';
+
+function hasPrintableParticipantId(
+    participant: ParticipantRow,
+): participant is ParticipantRow & { id: number } {
+    return Number.isInteger(participant.id) && participant.id > 0;
+}
+
+function nextFrame() {
+    return new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+    });
+}
+
+function csrfToken() {
+    return (
+        document
+            .querySelector<HTMLMetaElement>('meta[name="csrf-token"]')
+            ?.getAttribute('content') ?? ''
+    );
+}
+
+function filenameFromDisposition(value: string | null) {
+    if (!value) return null;
+
+    const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1]);
+
+    const match = value.match(/filename="?([^"]+)"?/i);
+    return match?.[1] ?? null;
+}
+
+async function downloadPdfResponse(response: Response, fallbackName: string) {
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download =
+        filenameFromDisposition(response.headers.get('content-disposition')) ??
+        fallbackName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
 function getFlagSrc(country?: Country | null) {
     if (!country) return null;
     if (country.flag_url) return country.flag_url;
@@ -971,9 +1026,7 @@ function ParticipantIdPrintCard({
                 <div className="relative h-full w-full overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-sm dark:border-white/10 dark:bg-slate-950">
                     {/* Background */}
                     <div aria-hidden className="absolute inset-0">
-                        <img
-                            src="/img/bg.png"
-                            alt=""
+                        <div
                             className={cn(
                                 'absolute inset-0 h-full w-full object-cover',
                                 'brightness-80 contrast-150 saturate-200 filter',
@@ -982,9 +1035,11 @@ function ParticipantIdPrintCard({
                                     ? 'opacity-100 dark:opacity-35'
                                     : 'opacity-100 dark:opacity-30',
                             )}
-                            draggable={false}
-                            loading="eager"
-                            decoding="async"
+                            style={{
+                                backgroundImage: "url('/img/bg.png')",
+                                backgroundPosition: 'center',
+                                backgroundSize: 'cover',
+                            }}
                         />
 
                         <div className="absolute inset-0 bg-black/10 dark:bg-black/15" />
@@ -1211,6 +1266,7 @@ function ParticipantIdPrintCard({
                                         style={{
                                             width: qrSize,
                                             height: qrSize,
+                                            imageRendering: 'pixelated',
                                         }}
                                         draggable={false}
                                     />
@@ -1521,8 +1577,8 @@ export default function ParticipantPage(props: PageProps) {
     );
     const [participantFormStep, setParticipantFormStep] =
         React.useState<ParticipantFormStep>(1);
-    const [printOrientation, setPrintOrientation] =
-        React.useState<PrintOrientation>('portrait');
+    const [printJob] = React.useState<PrintJob | null>(null);
+    const [isPreparingPdf, setIsPreparingPdf] = React.useState(false);
     const [qrDataUrls, setQrDataUrls] = React.useState<Record<number, string>>(
         {},
     );
@@ -1535,38 +1591,43 @@ export default function ParticipantPage(props: PageProps) {
 
         if (pending.length === 0) return;
 
-        const results = await Promise.all(
-            pending.map(async (p) => {
-                try {
-                    const dataUrl = await QRCode.toDataURL(p.qr_payload ?? '', {
-                        margin: 1,
-                        scale: 8,
-                        errorCorrectionLevel: 'M',
-                    });
-                    return { id: p.id, dataUrl };
-                } catch {
-                    return null;
-                }
-            }),
-        );
-
         const next = { ...qrCacheRef.current };
         let changed = false;
 
-        for (const r of results) {
-            if (!r) continue;
-            next[r.id] = r.dataUrl;
-            changed = true;
+        for (let i = 0; i < pending.length; i += QR_BATCH_SIZE) {
+            const batch = pending.slice(i, i + QR_BATCH_SIZE);
+            const results = await Promise.all(
+                batch.map(async (p) => {
+                    try {
+                        const dataUrl = await QRCode.toDataURL(
+                            p.qr_payload ?? '',
+                            {
+                                margin: 1,
+                                width: QR_DATA_URL_WIDTH,
+                                errorCorrectionLevel: 'M',
+                            },
+                        );
+                        return { id: p.id, dataUrl };
+                    } catch {
+                        return null;
+                    }
+                }),
+            );
+
+            for (const r of results) {
+                if (!r) continue;
+                next[r.id] = r.dataUrl;
+                changed = true;
+            }
+
+            qrCacheRef.current = next;
+            await nextFrame();
         }
 
         if (changed) {
-            qrCacheRef.current = next;
-            setQrDataUrls(next);
+            setQrDataUrls({ ...next });
         }
     }
-
-    const [printMounted, setPrintMounted] = React.useState(false);
-    React.useEffect(() => setPrintMounted(true), []);
 
     // dialogs
     const [participantDialogOpen, setParticipantDialogOpen] =
@@ -1955,12 +2016,17 @@ export default function ParticipantPage(props: PageProps) {
     }, [orderedUserTypes, userTypeQuery]);
 
     const participantById = React.useMemo(
-        () => new Map(resolvedParticipants.map((p) => [p.id, p])),
+        () =>
+            new Map(
+                resolvedParticipants
+                    .filter(hasPrintableParticipantId)
+                    .map((p) => [p.id, p]),
+            ),
         [resolvedParticipants],
     );
 
     const selectableVisibleParticipants = React.useMemo(
-        () => paginatedParticipants,
+        () => paginatedParticipants.filter(hasPrintableParticipantId),
         [paginatedParticipants],
     );
 
@@ -2960,19 +3026,50 @@ export default function ParticipantPage(props: PageProps) {
         setUserTypeDialogOpen(true);
     }
 
-    async function requestPrintIds(orientation: PrintOrientation) {
-        if (selectedParticipantsPrintable.length === 0) {
-            toast.error('Select at least one participant to print.');
+    async function downloadIdCardsPdf(orientation: PrintOrientation) {
+        const selectedIds = selectedParticipantsPrintable
+            .map((p) => p.id)
+            .filter((id): id is number => Number.isInteger(id) && id > 0);
+
+        if (selectedIds.length === 0) {
+            toast.error('Select at least one participant to download.');
             return;
         }
 
-        setPrintOrientation(orientation);
+        if (isPreparingPdf) return;
 
-        await ensureQrForParticipants(selectedParticipantsPrintable);
+        setIsPreparingPdf(true);
 
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => window.print());
-        });
+        try {
+            const response = await fetch(ID_CARDS_PDF_ENDPOINT, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/pdf',
+                    'X-CSRF-TOKEN': csrfToken(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                body: JSON.stringify({
+                    orientation,
+                    ids: selectedIds,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`PDF request failed with ${response.status}`);
+            }
+
+            await downloadPdfResponse(
+                response,
+                `participant-ids-${orientation}.pdf`,
+            );
+            toast.success('Participant ID PDF downloaded.');
+        } catch {
+            toast.error('Unable to download ID PDF. Please try again.');
+        } finally {
+            setIsPreparingPdf(false);
+        }
     }
 
     function toggleParticipantSelect(id: number, checked: boolean) {
@@ -3103,6 +3200,7 @@ export default function ParticipantPage(props: PageProps) {
     function renderMobileParticipantCard(p: ParticipantRow) {
         const isChed = isChedParticipant(p);
         const isExpanded = expandedRowIds.has(p.id);
+        const canPrintIdCard = hasPrintableParticipantId(p);
         const asemme10Registration = p.asemme10_registration;
         const asemme10DelegationDetails =
             asemme10Registration?.delegation_details ?? {};
@@ -3128,8 +3226,13 @@ export default function ParticipantPage(props: PageProps) {
                         onClick={(event) => event.stopPropagation()}
                     >
                         <Checkbox
-                            checked={selectedParticipantIds.has(p.id)}
+                            checked={
+                                canPrintIdCard &&
+                                selectedParticipantIds.has(p.id)
+                            }
+                            disabled={!canPrintIdCard}
                             onCheckedChange={(checked) =>
+                                canPrintIdCard &&
                                 toggleParticipantSelect(p.id, !!checked)
                             }
                             aria-label={`Select ${p.full_name}`}
@@ -4283,18 +4386,19 @@ export default function ParticipantPage(props: PageProps) {
                                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
                                     <div>
                                         {selectedParticipantsPrintable.length}{' '}
-                                        selected for ID printing
+                                        selected for ID PDF
                                     </div>
                                     <div className="flex flex-wrap gap-2">
                                         <Button
                                             type="button"
                                             size="sm"
                                             onClick={() =>
-                                                requestPrintIds('portrait')
+                                                downloadIdCardsPdf('portrait')
                                             }
                                             disabled={
+                                                isPreparingPdf ||
                                                 selectedParticipantsPrintable.length ===
-                                                0
+                                                    0
                                             }
                                             className={cn(
                                                 'rounded-xl',
@@ -4304,18 +4408,21 @@ export default function ParticipantPage(props: PageProps) {
                                             )}
                                         >
                                             <Printer className="mr-2 h-4 w-4" />
-                                            Print IDs (Portrait)
+                                            {isPreparingPdf
+                                                ? 'Preparing PDF...'
+                                                : 'Download PDF (Portrait)'}
                                         </Button>
 
                                         <Button
                                             type="button"
                                             size="sm"
                                             onClick={() =>
-                                                requestPrintIds('landscape')
+                                                downloadIdCardsPdf('landscape')
                                             }
                                             disabled={
+                                                isPreparingPdf ||
                                                 selectedParticipantsPrintable.length ===
-                                                0
+                                                    0
                                             }
                                             className={cn(
                                                 'rounded-xl',
@@ -4325,7 +4432,9 @@ export default function ParticipantPage(props: PageProps) {
                                             )}
                                         >
                                             <Printer className="mr-2 h-4 w-4" />
-                                            Print IDs (Landscape)
+                                            {isPreparingPdf
+                                                ? 'Preparing PDF...'
+                                                : 'Download PDF (Landscape)'}
                                         </Button>
                                     </div>
                                 </div>
@@ -4549,6 +4658,10 @@ export default function ParticipantPage(props: PageProps) {
                                                                 expandedRowIds.has(
                                                                     p.id,
                                                                 );
+                                                            const canPrintIdCard =
+                                                                hasPrintableParticipantId(
+                                                                    p,
+                                                                );
                                                             const asemme10Registration =
                                                                 p.asemme10_registration;
                                                             const asemme10DelegationDetails =
@@ -4645,16 +4758,26 @@ export default function ParticipantPage(props: PageProps) {
                                                                                 }
                                                                             >
                                                                                 <Checkbox
-                                                                                    checked={selectedParticipantIds.has(
-                                                                                        p.id,
-                                                                                    )}
+                                                                                    checked={
+                                                                                        canPrintIdCard &&
+                                                                                        selectedParticipantIds.has(
+                                                                                            p.id,
+                                                                                        )
+                                                                                    }
+                                                                                    disabled={
+                                                                                        !canPrintIdCard
+                                                                                    }
                                                                                     onCheckedChange={(
                                                                                         checked,
                                                                                     ) => {
-                                                                                        toggleParticipantSelect(
-                                                                                            p.id,
-                                                                                            !!checked,
-                                                                                        );
+                                                                                        if (
+                                                                                            canPrintIdCard
+                                                                                        ) {
+                                                                                            toggleParticipantSelect(
+                                                                                                p.id,
+                                                                                                !!checked,
+                                                                                            );
+                                                                                        }
                                                                                     }}
                                                                                     aria-label={`Select ${p.full_name}`}
                                                                                 />
@@ -8813,16 +8936,16 @@ export default function ParticipantPage(props: PageProps) {
                 </AlertDialogContent>
             </AlertDialog>
 
-            {printMounted
+            {printJob
                 ? createPortal(
                       <div
                           id="participant-print-root"
-                          data-orientation={printOrientation}
+                          data-orientation={printJob.orientation}
                           className="hidden print:block"
                       >
                           <style>{`
                   @media print {
-                      @page { size: ${printOrientation === 'landscape' ? '297mm 210mm' : '210mm 297mm'}; margin: 0; }
+                      @page { size: ${printJob.orientation === 'landscape' ? '297mm 210mm' : '210mm 297mm'}; margin: 0; }
                       html, body { margin: 0 !important; padding: 0 !important; height: auto !important; background: #fff !important; }
                       * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 
@@ -8834,12 +8957,12 @@ export default function ParticipantPage(props: PageProps) {
 
                       .print-grid {
                           display: grid;
-                          gap: ${printOrientation === 'landscape' ? '0.12in' : '0.08in'};
+                          gap: ${printJob.orientation === 'landscape' ? '0.12in' : '0.08in'};
                           align-content: start;
                           justify-content: start;
-                          grid-template-columns: repeat(${printOrientation === 'landscape' ? 3 : 2}, ${printOrientation === 'landscape' ? '3.37in' : '3.1in'});
-                          grid-auto-rows: ${printOrientation === 'landscape' ? '2.125in' : '5.05in'};
-                          max-width: ${printOrientation === 'landscape' ? '10.35in' : '6.28in'};
+                          grid-template-columns: repeat(${printJob.orientation === 'landscape' ? 3 : 2}, ${printJob.orientation === 'landscape' ? '3.37in' : '3.1in'});
+                          grid-auto-rows: ${printJob.orientation === 'landscape' ? '2.125in' : '5.05in'};
+                          max-width: ${printJob.orientation === 'landscape' ? '10.35in' : '6.28in'};
                       }
 
                       .id-print-card { break-inside: avoid; page-break-inside: avoid; box-sizing: border-box; box-shadow: none !important; }
@@ -8851,8 +8974,8 @@ export default function ParticipantPage(props: PageProps) {
               `}</style>
 
                           {chunk(
-                              selectedParticipantsPrintable,
-                              printOrientation === 'landscape' ? 9 : 4,
+                              printJob.participants,
+                              printJob.orientation === 'landscape' ? 9 : 4,
                           ).map((page, pageIndex) => (
                               <div key={pageIndex} className="print-page">
                                   <div className="print-grid">
@@ -8860,8 +8983,10 @@ export default function ParticipantPage(props: PageProps) {
                                           <ParticipantIdPrintCard
                                               key={p.id}
                                               participant={p}
-                                              qrDataUrl={qrDataUrls[p.id]}
-                                              orientation={printOrientation}
+                                              qrDataUrl={
+                                                  qrCacheRef.current[p.id]
+                                              }
+                                              orientation={printJob.orientation}
                                           />
                                       ))}
                                   </div>
