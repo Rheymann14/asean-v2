@@ -25,6 +25,7 @@ class ScannerController extends Controller
                 return [
                     'id' => $programme->id,
                     'title' => $programme->title,
+                    'image_url' => $programme->image_url,
                     'starts_at' => $programme->starts_at?->toISOString(),
                     'ends_at' => $programme->ends_at?->toISOString(),
                     'is_active' => $programme->is_active,
@@ -100,27 +101,26 @@ class ScannerController extends Controller
         }
 
         $participant->loadMissing(['country', 'userType', 'joinedProgrammes']);
-        
-            $rawProfilePath = $participant->profile_image_path
+
+        $rawProfilePath = $participant->profile_image_path
         ?? $participant->profile_image
         ?? $participant->profile_photo_path
         ?? null;
 
-    $profileImageUrl = null;
-    if ($rawProfilePath) {
-        $rawProfilePath = ltrim((string) $rawProfilePath, '/');
+        $profileImageUrl = null;
+        if ($rawProfilePath) {
+            $rawProfilePath = ltrim((string) $rawProfilePath, '/');
 
-        if (str_starts_with($rawProfilePath, 'http://') || str_starts_with($rawProfilePath, 'https://')) {
-            $profileImageUrl = $rawProfilePath;
-        } else {
-            $relative = str_starts_with($rawProfilePath, 'profile-image/')
-                ? $rawProfilePath
-                : 'profile-image/' . $rawProfilePath;
+            if (str_starts_with($rawProfilePath, 'http://') || str_starts_with($rawProfilePath, 'https://')) {
+                $profileImageUrl = $rawProfilePath;
+            } else {
+                $relative = str_starts_with($rawProfilePath, 'profile-image/')
+                    ? $rawProfilePath
+                    : 'profile-image/'.$rawProfilePath;
 
-            $profileImageUrl = asset($relative);
+                $profileImageUrl = asset($relative);
+            }
         }
-    }
-
 
         return response()->json([
             'ok' => true,
