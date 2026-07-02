@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Asemme10RegistrationController;
-use App\Http\Controllers\BrevoTestController;
 use App\Http\Controllers\ContactDetailController;
 use App\Http\Controllers\CountryController;
 use App\Http\Controllers\DashboardController;
@@ -28,11 +27,6 @@ Route::get('/', function () {
         'canRegister' => Features::enabled(Features::registration()),
     ]);
 })->name('home');
-
-Route::middleware(['auth'])->group(function () {
-    Route::get('/admin/brevo-test', [BrevoTestController::class, 'index'])->name('brevo.test');
-    Route::post('/admin/brevo-test/send', [BrevoTestController::class, 'send'])->name('brevo.test.send');
-});
 
 Route::post('/feedback', [FeedbackController::class, 'store'])->name('feedback.store');
 Route::post('/asemme10-registration', [Asemme10RegistrationController::class, 'store'])

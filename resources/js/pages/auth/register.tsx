@@ -111,7 +111,7 @@ type RegisteredParticipant = {
     name: string;
     email: string;
     display_id: string;
-    qr_payload: string;
+    qr_scan_value: string;
     event_title?: string | null;
     country_code?: string | null;
     country_name?: string | null;
@@ -126,7 +126,7 @@ type Asemme10Submission = {
         name: string;
         email?: string | null;
         display_id: string;
-        qr_payload: string;
+        qr_scan_value: string;
         role?: string | null;
         country_code?: string | null;
         country_name?: string | null;
@@ -139,7 +139,7 @@ type VirtualIdParticipant = {
     name: string;
     email?: string | null;
     display_id: string;
-    qr_payload: string;
+    qr_scan_value: string;
     event_title?: string | null;
     country_code?: string | null;
     country_name?: string | null;
@@ -1835,7 +1835,7 @@ export default function Register({
 
     React.useEffect(() => {
         let active = true;
-        const value = virtualIdParticipant?.qr_payload?.trim();
+        const value = virtualIdParticipant?.qr_scan_value?.trim();
 
         if (!value) {
             setSuccessQrDataUrl(null);
@@ -1861,7 +1861,7 @@ export default function Register({
         return () => {
             active = false;
         };
-    }, [virtualIdParticipant?.qr_payload]);
+    }, [virtualIdParticipant?.qr_scan_value]);
 
     const inputClass =
         'h-11 rounded-xl border-slate-200 bg-white shadow-[inset_0_1px_2px_rgba(2,6,23,0.06)] ' +

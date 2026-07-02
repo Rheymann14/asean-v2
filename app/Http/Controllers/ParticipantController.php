@@ -202,7 +202,7 @@ class ParticipantController extends Controller
                         'id' => $user?->id,
                         'full_name' => $fullName ?: ($attendee->badge_name ?: ($user?->name ?? 'Participant')),
                         'display_id' => $user?->display_id,
-                        'qr_payload' => $user?->qr_payload,
+                        'qr_scan_value' => $user?->qr_scan_value,
                         'profile_image_url' => $user?->profile_photo_path ? asset($user->profile_photo_path) : null,
                         'profile_photo_url' => $user?->profile_photo_path ? asset($user->profile_photo_path) : null,
                         'profile_photo_path' => $user?->profile_photo_path,
@@ -357,7 +357,7 @@ class ParticipantController extends Controller
                         'id' => $user->id,
                         'full_name' => $user->name,
                         'display_id' => $user->display_id,
-                        'qr_payload' => $user->qr_payload,
+                        'qr_scan_value' => $user->qr_scan_value,
                         'profile_image_url' => $user->profile_photo_path ? asset($user->profile_photo_path) : null,
                         'profile_photo_url' => $user->profile_photo_path ? asset($user->profile_photo_path) : null,
                         'profile_photo_path' => $user->profile_photo_path,
@@ -486,7 +486,6 @@ class ParticipantController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'full_name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'contact_number' => ['nullable', 'string', 'max:30'],
             'contact_country_code' => ['nullable', 'string', 'max:10'],
@@ -495,9 +494,9 @@ class ParticipantController extends Controller
             'other_user_type' => ['nullable', 'string', 'max:255'],
             'honorific_title' => ['nullable', 'string', 'max:50'],
             'honorific_other' => ['nullable', 'string', 'max:255'],
-            'given_name' => ['nullable', 'string', 'max:255'],
+            'given_name' => ['required', 'string', 'max:255'],
             'middle_name' => ['nullable', 'string', 'max:255'],
-            'family_name' => ['nullable', 'string', 'max:255'],
+            'family_name' => ['required', 'string', 'max:255'],
             'suffix' => ['nullable', 'string', 'max:50'],
             'sex_assigned_at_birth' => ['nullable', 'string', Rule::in(['male', 'female'])],
             'organization_name' => ['nullable', 'string', 'max:255'],
@@ -542,7 +541,7 @@ class ParticipantController extends Controller
         );
 
         $user = User::create([
-            'name' => $fullName ?: $validated['full_name'],
+            'name' => $fullName,
             'email' => $validated['email'],
             'contact_number' => $validated['contact_number'] ?? null,
             'contact_country_code' => $validated['contact_country_code'] ?? null,
@@ -591,7 +590,6 @@ class ParticipantController extends Controller
     public function update(Request $request, User $participant)
     {
         $validator = Validator::make($request->all(), [
-            'full_name' => ['sometimes', 'required', 'string', 'max:255'],
             'email' => ['sometimes', 'required', 'email', 'max:255', 'unique:users,email,'.$participant->id],
             'contact_number' => ['sometimes', 'nullable', 'string', 'max:30'],
             'contact_country_code' => ['sometimes', 'nullable', 'string', 'max:10'],
@@ -600,9 +598,9 @@ class ParticipantController extends Controller
             'other_user_type' => ['sometimes', 'nullable', 'string', 'max:255'],
             'honorific_title' => ['sometimes', 'nullable', 'string', 'max:50'],
             'honorific_other' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'given_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'given_name' => ['sometimes', 'required', 'string', 'max:255'],
             'middle_name' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'family_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'family_name' => ['sometimes', 'required', 'string', 'max:255'],
             'suffix' => ['sometimes', 'nullable', 'string', 'max:50'],
             'sex_assigned_at_birth' => ['sometimes', 'nullable', 'string', Rule::in(['male', 'female'])],
             'organization_name' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -635,10 +633,6 @@ class ParticipantController extends Controller
 
         $wasActive = (bool) $participant->is_active;
         $updates = [];
-
-        if (array_key_exists('full_name', $validated)) {
-            $updates['name'] = $validated['full_name'];
-        }
 
         if (
             array_key_exists('given_name', $validated) ||
@@ -801,6 +795,7 @@ class ParticipantController extends Controller
                 'id',
                 'name',
                 'display_id',
+                'qr_token',
                 'qr_payload',
                 'country_id',
                 'user_type_id',
@@ -820,7 +815,7 @@ class ParticipantController extends Controller
                 'id' => $user->id,
                 'name' => $user->name ?: 'Participant',
                 'display_id' => $user->display_id ?: (string) $user->id,
-                'qr_payload' => $user->qr_payload ?: ($user->display_id ?: (string) $user->id),
+                'qr_scan_value' => $user->qr_scan_value,
                 'country_name' => $user->country?->name ?: '-',
                 'country_code' => $user->country?->code ? strtoupper($user->country->code) : '',
                 'type_name' => $user->userType?->name ?: '',
@@ -988,7 +983,8 @@ class ParticipantController extends Controller
         $countryCode = $this->pdfText((string) $participant['country_code']);
         $type = $this->pdfText((string) $participant['type_name']);
         $displayId = $this->pdfText((string) $participant['display_id']);
-        $qrPayload = (string) ($participant['qr_payload'] ?? $participant['display_id']);
+        // opaque QR value (ASEANPH:<token>) — raw, not pdfText-processed
+        $qrScanValue = (string) ($participant['qr_scan_value'] ?? $participant['display_id']);
         $flagPath = $participant['flag_path'] ?? null;
 
         $bodyTop = $top - $pad - 43.0;
@@ -1031,7 +1027,7 @@ class ParticipantController extends Controller
             $this->roundedBorder($pdf, $x + $pad, $idBadgeY, $idWidth, $idBadgeH, 7.0);
             $this->drawText($pdf, $idText, $x + $pad + 6.0, $idBadgeY + 5.7, 6.8, [0.02, 0.06, 0.16]);
 
-            $this->drawQrPanel($pdf, $displayId, $qrPayload, $qrPanelX, $qrPanelY, $qrPanelW, $qrPanelH, 54.0, true, $countryCode, $name);
+            $this->drawQrPanel($pdf, $displayId, $qrScanValue, $qrPanelX, $qrPanelY, $qrPanelW, $qrPanelH, 54.0, true, $countryCode, $name);
 
             return;
         }
@@ -1068,13 +1064,13 @@ class ParticipantController extends Controller
         $qrPanelH = 128.0;
         $qrPanelX = $x + $pad;
         $qrPanelY = $y + 24.0;
-        $this->drawQrPanel($pdf, $displayId, $qrPayload, $qrPanelX, $qrPanelY, $qrPanelW, $qrPanelH, 80.0, false, $countryCode, $name);
+        $this->drawQrPanel($pdf, $displayId, $qrScanValue, $qrPanelX, $qrPanelY, $qrPanelW, $qrPanelH, 80.0, false, $countryCode, $name);
     }
 
     private function drawQrPanel(
         Cpdf $pdf,
         string $displayId,
-        string $qrPayload,
+        string $qrScanValue,
         float $x,
         float $y,
         float $width,
@@ -1083,8 +1079,7 @@ class ParticipantController extends Controller
         bool $compact,
         string $countryCode = '',
         string $name = ''
-    ): void
-    {
+    ): void {
         $radius = $compact ? 11.0 : 15.0;
         $this->filledRoundedRectangle($pdf, $x, $y, $width, $height, $radius);
         $pdf->setStrokeColor([0.82, 0.88, 0.96]);
@@ -1097,7 +1092,7 @@ class ParticipantController extends Controller
         $qrY = $y + ($compact ? 26.0 : 31.0);
         $pdf->setColor([1, 1, 1]);
         $pdf->filledRectangle($qrX, $qrY, $qrSize, $qrSize);
-        $this->drawQr($pdf, $qrPayload, $qrX + 3.0, $qrY + 3.0, $qrSize - 6.0);
+        $this->drawQr($pdf, $qrScanValue, $qrX + 3.0, $qrY + 3.0, $qrSize - 6.0);
 
         $ownerText = trim(($countryCode !== '' ? $countryCode.' - ' : '').$name);
         if ($ownerText !== '') {

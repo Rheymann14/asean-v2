@@ -4,22 +4,12 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Notifications\Notifiable;
-use Laravel\Fortify\TwoFactorAuthenticatable;
-use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-
-
-use App\Models\Country;
-use App\Models\UserType;
-use App\Models\Issuance;
-use App\Models\Programme;
-use App\Models\ParticipantTableAssignment;
-use App\Models\ActivityLog;
-use App\Models\RegistrationFieldResponse;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Str;
+use Laravel\Fortify\TwoFactorAuthenticatable;
 
 class User extends Authenticatable
 {
@@ -104,26 +94,32 @@ class User extends Authenticatable
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function ($user) {
+            if (empty($user->display_id)) {
+                // Nice human-readable ID
+                $user->display_id = 'ASEAN-'.strtoupper(Str::random(4)).'-'.strtoupper(Str::random(4));
+            }
 
-  protected static function booted(): void
-{
-    static::creating(function ($user) {
-        if (empty($user->display_id)) {
-            // Nice human-readable ID
-            $user->display_id = 'ASEAN-' . strtoupper(Str::random(4)) . '-' . strtoupper(Str::random(4));
-        }
+            if (empty($user->qr_token)) {
+                $user->qr_token = (string) Str::uuid();
+            }
+        });
+    }
 
-        if (empty($user->qr_token)) {
-            $user->qr_token = (string) Str::uuid();
-        }
-
-        if (empty($user->qr_payload)) {
-            // ✅ encrypted payload (safe to embed in QR)
-            // You can encrypt the token only, or a small JSON payload.
-            $user->qr_payload = Crypt::encryptString($user->qr_token);
-        }
-    });
-}
+    /**
+     * Value encoded into the participant QR code.
+     *
+     * Returning participants from the previous event keep their original
+     * encrypted qr_payload (so already-issued/printed QRs stay identical),
+     * while new users have no payload and get the short bare qr_token —
+     * a low-density QR that scans much faster. The scanner resolves both.
+     */
+    public function getQrScanValueAttribute(): string
+    {
+        return (string) ($this->qr_payload ?: $this->qr_token);
+    }
 
     public function country()
     {

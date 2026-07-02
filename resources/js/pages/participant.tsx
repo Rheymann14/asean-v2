@@ -98,6 +98,12 @@ import {
     XCircle,
 } from 'lucide-react';
 import QRCode from 'qrcode';
+import ReactCrop, {
+    centerCrop,
+    makeAspectCrop,
+    type Crop,
+} from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 
 type Country = {
     id: number;
@@ -159,7 +165,7 @@ type RegistrationFieldRow = {
 type ParticipantRow = {
     id: number;
     display_id?: string | null;
-    qr_payload?: string | null;
+    qr_scan_value?: string | null;
     profile_image_url?: string | null;
     profile_photo_url?: string | null;
     profile_photo_path?: string | null;
@@ -506,7 +512,6 @@ type ParticipantFormStep = 1 | 2 | 3 | 4;
 
 const STEP_FIELDS: Record<ParticipantFormStep, string[]> = {
     1: [
-        'full_name',
         'honorific_title',
         'honorific_other',
         'given_name',
@@ -1586,7 +1591,7 @@ export default function ParticipantPage(props: PageProps) {
 
     async function ensureQrForParticipants(list: ParticipantRow[]) {
         const pending = list.filter(
-            (p) => !!p.qr_payload && !qrCacheRef.current[p.id],
+            (p) => !!p.qr_scan_value && !qrCacheRef.current[p.id],
         );
 
         if (pending.length === 0) return;
@@ -1600,7 +1605,7 @@ export default function ParticipantPage(props: PageProps) {
                 batch.map(async (p) => {
                     try {
                         const dataUrl = await QRCode.toDataURL(
-                            p.qr_payload ?? '',
+                            p.qr_scan_value ?? '',
                             {
                                 margin: 1,
                                 width: QR_DATA_URL_WIDTH,
@@ -1667,6 +1672,11 @@ export default function ParticipantPage(props: PageProps) {
         null,
     );
 
+    // ✅ profile-image cropping (square 1:1) via react-image-crop
+    const [cropImageSrc, setCropImageSrc] = React.useState<string | null>(null);
+    const [crop, setCrop] = React.useState<Crop>();
+    const cropImageRef = React.useRef<HTMLImageElement | null>(null);
+
     async function openVirtualIdDialog(participant: ParticipantRow) {
         setVirtualIdParticipant(participant);
         setVirtualIdDialogOpen(true);
@@ -1697,7 +1707,6 @@ export default function ParticipantPage(props: PageProps) {
     // Forms (Inertia)
     // ---------------------------------------
     const participantForm = useForm<{
-        full_name: string;
         email: string;
         contact_number: string;
         contact_country_code: string;
@@ -1732,7 +1741,6 @@ export default function ParticipantPage(props: PageProps) {
         programme_id: string;
         registration_responses: DynamicResponses;
     }>({
-        full_name: '',
         email: '',
         contact_number: '',
         contact_country_code: '',
@@ -2288,21 +2296,83 @@ export default function ParticipantPage(props: PageProps) {
         });
     }
 
+    // ✅ selecting a file opens the cropper instead of using the raw image
     function handleParticipantProfileChange(
         e: React.ChangeEvent<HTMLInputElement>,
     ) {
         const file = e.target.files?.[0] ?? null;
-        participantForm.setData('profile_image', file);
-        participantForm.setData('remove_profile_image', false);
 
         if (!file) {
-            resetParticipantProfilePreview(
-                resolveParticipantProfileImage(editingParticipant),
-            );
             return;
         }
 
-        resetParticipantProfilePreview(URL.createObjectURL(file));
+        const reader = new FileReader();
+        reader.onload = () => setCropImageSrc(String(reader.result));
+        reader.readAsDataURL(file);
+
+        // allow re-selecting the same file later
+        e.target.value = '';
+    }
+
+    // center a square crop when the image loads into the cropper
+    function onCropImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
+        const { width, height } = e.currentTarget;
+        setCrop(
+            centerCrop(
+                makeAspectCrop({ unit: '%', width: 90 }, 1, width, height),
+                width,
+                height,
+            ),
+        );
+    }
+
+    function cancelParticipantCrop() {
+        setCropImageSrc(null);
+        setCrop(undefined);
+        if (participantProfileInputRef.current) {
+            participantProfileInputRef.current.value = '';
+        }
+    }
+
+    // draw the selected square region to a canvas and store it as the upload file
+    function applyParticipantCrop() {
+        const image = cropImageRef.current;
+        if (!image || !crop || !crop.width || !crop.height) {
+            return;
+        }
+
+        // crop is in '%', so map straight onto the natural image pixels
+        const sx = (crop.x / 100) * image.naturalWidth;
+        const sy = (crop.y / 100) * image.naturalHeight;
+        const sw = (crop.width / 100) * image.naturalWidth;
+        const sh = (crop.height / 100) * image.naturalHeight;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(sw);
+        canvas.height = Math.round(sh);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            return;
+        }
+        ctx.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+        canvas.toBlob(
+            (blob) => {
+                if (!blob) {
+                    return;
+                }
+                const file = new File([blob], 'profile.jpg', {
+                    type: 'image/jpeg',
+                });
+                participantForm.setData('profile_image', file);
+                participantForm.setData('remove_profile_image', false);
+                resetParticipantProfilePreview(URL.createObjectURL(blob));
+                setCropImageSrc(null);
+                setCrop(undefined);
+            },
+            'image/jpeg',
+            0.92,
+        );
     }
 
     function removeParticipantProfileImage() {
@@ -2549,6 +2619,7 @@ export default function ParticipantPage(props: PageProps) {
             participantProfileInputRef.current.value = '';
         }
         resetParticipantProfilePreview(null);
+        cancelParticipantCrop();
         participantForm.clearErrors();
         setParticipantFormStep(1);
         setParticipantDialogOpen(true);
@@ -2558,7 +2629,6 @@ export default function ParticipantPage(props: PageProps) {
         setEditingParticipant(p);
         const programmeId = defaultProgrammeId(p);
         participantForm.setData({
-            full_name: p.full_name ?? '',
             email: p.email ?? '',
             contact_number: p.contact_number ?? '',
             contact_country_code: p.contact_country_code ?? '',
@@ -2597,6 +2667,7 @@ export default function ParticipantPage(props: PageProps) {
             participantProfileInputRef.current.value = '';
         }
         resetParticipantProfilePreview(resolveParticipantProfileImage(p));
+        cancelParticipantCrop();
         participantForm.clearErrors();
         setParticipantFormStep(1);
         setParticipantDialogOpen(true);
@@ -2612,7 +2683,6 @@ export default function ParticipantPage(props: PageProps) {
 
         participantForm.transform((data) => ({
             ...(editingParticipant ? { _method: 'patch' as const } : {}),
-            full_name: data.full_name.trim(),
             email: data.email.trim(),
             contact_number: data.contact_number.trim() || null,
             contact_country_code: data.contact_country_code.trim() || null,
@@ -7169,38 +7239,6 @@ export default function ParticipantPage(props: PageProps) {
                                 {/* Step 1: Personal Information */}
                                 {participantFormStep === 1 && (
                                     <div className="grid gap-3 sm:grid-cols-2">
-                                        <div className="space-y-1.5 sm:col-span-2">
-                                            <div className="text-sm font-medium">
-                                                Full name{' '}
-                                                <span className="text-[11px] font-semibold text-red-600">
-                                                    {' '}
-                                                    *
-                                                </span>
-                                            </div>
-                                            <Input
-                                                value={
-                                                    participantForm.data
-                                                        .full_name
-                                                }
-                                                onChange={(e) =>
-                                                    participantForm.setData(
-                                                        'full_name',
-                                                        e.target.value,
-                                                    )
-                                                }
-                                                placeholder="e.g. Juan Dela Cruz"
-                                            />
-                                            {participantForm.errors
-                                                .full_name ? (
-                                                <div className="text-xs text-red-600">
-                                                    {
-                                                        participantForm.errors
-                                                            .full_name
-                                                    }
-                                                </div>
-                                            ) : null}
-                                        </div>
-
                                         <div className="space-y-2 sm:col-span-2">
                                             <div className="flex items-center justify-between">
                                                 <div className="text-sm font-medium">
@@ -7209,7 +7247,7 @@ export default function ParticipantPage(props: PageProps) {
                                             </div>
 
                                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                                                <div className="grid h-20 w-full place-items-center overflow-hidden rounded-xl border border-slate-200 bg-white sm:w-[140px] dark:border-slate-800 dark:bg-slate-950">
+                                                <div className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                                                     {participantProfilePreview ? (
                                                         <img
                                                             src={
@@ -7267,6 +7305,82 @@ export default function ParticipantPage(props: PageProps) {
                                                     </div>
                                                 </div>
                                             </div>
+
+                                            <Dialog
+                                                open={!!cropImageSrc}
+                                                onOpenChange={(open) => {
+                                                    if (!open) {
+                                                        cancelParticipantCrop();
+                                                    }
+                                                }}
+                                            >
+                                                <DialogContent className="max-w-md">
+                                                    <DialogHeader>
+                                                        <DialogTitle>
+                                                            Crop profile photo
+                                                        </DialogTitle>
+                                                        <DialogDescription>
+                                                            Drag or resize the
+                                                            box to frame the
+                                                            photo. It will be
+                                                            saved as a square.
+                                                        </DialogDescription>
+                                                    </DialogHeader>
+
+                                                    <div className="grid max-h-[55vh] place-items-center overflow-auto rounded-xl bg-slate-100 p-2 dark:bg-slate-900/40">
+                                                        {cropImageSrc ? (
+                                                            <ReactCrop
+                                                                crop={crop}
+                                                                onChange={(
+                                                                    _,
+                                                                    percentCrop,
+                                                                ) =>
+                                                                    setCrop(
+                                                                        percentCrop,
+                                                                    )
+                                                                }
+                                                                aspect={1}
+                                                                keepSelection
+                                                                className="max-h-[50vh]"
+                                                            >
+                                                                <img
+                                                                    ref={
+                                                                        cropImageRef
+                                                                    }
+                                                                    src={
+                                                                        cropImageSrc
+                                                                    }
+                                                                    alt="Crop profile"
+                                                                    onLoad={
+                                                                        onCropImageLoad
+                                                                    }
+                                                                    className="max-h-[50vh] w-auto"
+                                                                />
+                                                            </ReactCrop>
+                                                        ) : null}
+                                                    </div>
+
+                                                    <DialogFooter>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            onClick={
+                                                                cancelParticipantCrop
+                                                            }
+                                                        >
+                                                            Cancel
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            onClick={
+                                                                applyParticipantCrop
+                                                            }
+                                                        >
+                                                            Apply crop
+                                                        </Button>
+                                                    </DialogFooter>
+                                                </DialogContent>
+                                            </Dialog>
                                         </div>
 
                                         <div className="space-y-1.5">
@@ -7417,7 +7531,11 @@ export default function ParticipantPage(props: PageProps) {
 
                                         <div className="space-y-1.5">
                                             <div className="text-sm font-medium">
-                                                Given name
+                                                Given name{' '}
+                                                <span className="text-[11px] font-semibold text-red-600">
+                                                    {' '}
+                                                    *
+                                                </span>
                                             </div>
                                             <Input
                                                 value={
@@ -7432,6 +7550,15 @@ export default function ParticipantPage(props: PageProps) {
                                                 }
                                                 placeholder="First name"
                                             />
+                                            {participantForm.errors
+                                                .given_name ? (
+                                                <div className="text-xs text-red-600">
+                                                    {
+                                                        participantForm.errors
+                                                            .given_name
+                                                    }
+                                                </div>
+                                            ) : null}
                                         </div>
 
                                         <div className="space-y-1.5">
@@ -7455,7 +7582,11 @@ export default function ParticipantPage(props: PageProps) {
 
                                         <div className="space-y-1.5">
                                             <div className="text-sm font-medium">
-                                                Family name / Surname
+                                                Family name / Surname{' '}
+                                                <span className="text-[11px] font-semibold text-red-600">
+                                                    {' '}
+                                                    *
+                                                </span>
                                             </div>
                                             <Input
                                                 value={
@@ -7470,6 +7601,15 @@ export default function ParticipantPage(props: PageProps) {
                                                 }
                                                 placeholder="Surname"
                                             />
+                                            {participantForm.errors
+                                                .family_name ? (
+                                                <div className="text-xs text-red-600">
+                                                    {
+                                                        participantForm.errors
+                                                            .family_name
+                                                    }
+                                                </div>
+                                            ) : null}
                                         </div>
 
                                         <div className="space-y-1.5">

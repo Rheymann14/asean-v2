@@ -379,7 +379,7 @@ test('ASEMME10 delegation registration creates scannable participants', function
 
     foreach ($participants as $participant) {
         expect($participant->display_id)->not->toBeNull();
-        expect($participant->qr_payload)->not->toBeNull();
+        expect($participant->qr_token)->not->toBeNull();
         expect($participant->joinedProgrammes()->whereKey($programme->id)->exists())->toBeTrue();
     }
 });
@@ -464,7 +464,7 @@ test('ASEMME10 delegation registration keeps blank attendee emails empty', funct
     expect($participant->email)->toBeNull();
     expect($attendee->email)->toBeNull();
     expect($participant->display_id)->not->toBeNull();
-    expect($participant->qr_payload)->not->toBeNull();
+    expect($participant->qr_token)->not->toBeNull();
 
     $this->actingAs($admin)
         ->get(route('participant', ['programme_id' => $programme->id]))

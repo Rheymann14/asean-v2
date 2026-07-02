@@ -69,7 +69,7 @@ type Assignment = {
 type Participant = {
     id: number;
     display_id?: string | null;
-    qr_payload?: string | null;
+    qr_scan_value?: string | null;
     profile_photo_url?: string | null;
     full_name: string;
     email: string | null;
@@ -219,7 +219,7 @@ function VirtualLandscapeId({ participant }: { participant: Participant }) {
     React.useEffect(() => {
         let active = true;
         const run = async () => {
-            const value = participant.qr_payload?.trim() ?? '';
+            const value = participant.qr_scan_value?.trim() ?? '';
             if (!value) {
                 setQrDataUrl(null);
                 return;
@@ -240,7 +240,7 @@ function VirtualLandscapeId({ participant }: { participant: Participant }) {
         return () => {
             active = false;
         };
-    }, [participant.qr_payload]);
+    }, [participant.qr_scan_value]);
 
     return (
         <div className="mx-auto w-full max-w-[520px]">
@@ -442,8 +442,9 @@ export default function VehicleAssignmentPage({
     const [presenceOverrides, setPresenceOverrides] = React.useState<
         Record<number, boolean>
     >({});
-    const [sendingPickupVehicleId, setSendingPickupVehicleId] =
-        React.useState<number | null>(null);
+    const [sendingPickupVehicleId, setSendingPickupVehicleId] = React.useState<
+        number | null
+    >(null);
     const [idPreviewParticipant, setIdPreviewParticipant] =
         React.useState<Participant | null>(null);
     const perPage = 10;
@@ -716,7 +717,8 @@ export default function VehicleAssignmentPage({
                 return;
             }
 
-            counts[assignment.vehicle_id] = (counts[assignment.vehicle_id] ?? 0) + 1;
+            counts[assignment.vehicle_id] =
+                (counts[assignment.vehicle_id] ?? 0) + 1;
         });
 
         return counts;
@@ -830,7 +832,10 @@ export default function VehicleAssignmentPage({
                                                 '—'}
                                         </p>
                                         <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
-                                            Checked passengers: {checkedPassengersByVehicle[vehicle.id] ?? 0}
+                                            Checked passengers:{' '}
+                                            {checkedPassengersByVehicle[
+                                                vehicle.id
+                                            ] ?? 0}
                                         </p>
                                         <Button
                                             type="button"
@@ -843,8 +848,11 @@ export default function VehicleAssignmentPage({
                                             )}
                                             disabled={
                                                 (!vehicle.pickup_sent_at &&
-                                                    (checkedPassengersByVehicle[vehicle.id] ?? 0) === 0) ||
-                                                sendingPickupVehicleId === vehicle.id
+                                                    (checkedPassengersByVehicle[
+                                                        vehicle.id
+                                                    ] ?? 0) === 0) ||
+                                                sendingPickupVehicleId ===
+                                                    vehicle.id
                                             }
                                             onClick={() =>
                                                 vehicle.pickup_sent_at
@@ -852,7 +860,8 @@ export default function VehicleAssignmentPage({
                                                     : sendPickup(vehicle.id)
                                             }
                                         >
-                                            {sendingPickupVehicleId === vehicle.id
+                                            {sendingPickupVehicleId ===
+                                            vehicle.id
                                                 ? vehicle.pickup_sent_at
                                                     ? 'Removing...'
                                                     : 'Sending...'
