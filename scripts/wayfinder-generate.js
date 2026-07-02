@@ -10,21 +10,29 @@ rmSync('resources/js/wayfinder', { recursive: true, force: true });
 execSync(`php artisan wayfinder:generate ${args}`, { stdio: 'inherit' });
 
 const routesIndexPath = 'resources/js/routes/index.ts';
-const duplicateImport =
-    "import { queryParams, type RouteQueryOptions, type RouteDefinition, type RouteFormDefinition } from '../wayfinder';";
+
+// Wayfinder can emit the `queryParams` import from the wayfinder helper twice
+// (once for routes, once for form variants), which breaks the build with
+// "Identifier 'queryParams' has already been declared". Match it robustly —
+// regardless of import path form ('../wayfinder' vs './../wayfinder') or a
+// trailing semicolon — and keep only the first occurrence.
+const isQueryParamsWayfinderImport = (line) =>
+    /^\s*import\s*\{[^}]*\bqueryParams\b[^}]*\}\s*from\s*['"][^'"]*wayfinder['"];?\s*$/.test(
+        line,
+    );
 
 if (existsSync(routesIndexPath)) {
     const contents = readFileSync(routesIndexPath, 'utf8');
     const lines = contents.split('\n');
-    let seenDuplicate = false;
+    let seenImport = false;
     const cleaned = lines.filter((line) => {
-        if (line !== duplicateImport) {
+        if (!isQueryParamsWayfinderImport(line)) {
             return true;
         }
-        if (seenDuplicate) {
+        if (seenImport) {
             return false;
         }
-        seenDuplicate = true;
+        seenImport = true;
         return true;
     });
 

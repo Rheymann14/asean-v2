@@ -135,7 +135,7 @@ class FortifyServiceProvider extends ServiceProvider
                             'name' => $participant->name,
                             'email' => $participant->email,
                             'display_id' => $participant->display_id,
-                            'qr_payload' => $participant->qr_payload,
+                            'qr_scan_value' => $participant->qr_scan_value,
                             'event_title' => $registeredEvent?->title,
                             'country_code' => $participant->country?->code,
                             'country_name' => $participant->country?->name,

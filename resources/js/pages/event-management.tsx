@@ -2235,8 +2235,15 @@ export default function EventManagement(props: PageProps) {
                         </div>
 
                         <div className="flex-1 overflow-y-auto px-6 pb-6">
-                            <div className="mt-4 grid gap-4">
-                                <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="mt-4 grid gap-5">
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="sm:col-span-2">
+                                        <div className="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
+                                            Event details
+                                        </div>
+                                        <div className="mt-2 h-px w-full bg-slate-200 dark:bg-slate-800" />
+                                    </div>
+
                                     <div className="space-y-1.5 sm:col-span-2">
                                         <div className="text-sm font-medium">
                                             Title
@@ -2322,19 +2329,42 @@ export default function EventManagement(props: PageProps) {
                                         ) : null}
                                     </div>
 
+                                    {/* SECTION: Cover image */}
+                                    <div className="sm:col-span-2">
+                                        <div className="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
+                                            Cover image
+                                        </div>
+                                        <div className="mt-2 h-px w-full bg-slate-200 dark:bg-slate-800" />
+                                    </div>
+
                                     {/* IMAGE (upload only) */}
                                     <div className="space-y-1.5 sm:col-span-2">
-                                        <div className="text-sm font-medium">
-                                            Image
-                                        </div>
+                                        <div className="grid gap-4 sm:grid-cols-[128px_1fr] sm:items-center">
+                                            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                                                <div className="aspect-square bg-slate-100 dark:bg-slate-900">
+                                                    <img
+                                                        src={
+                                                            imagePreview ??
+                                                            DEFAULT_EVENT_IMAGE
+                                                        }
+                                                        alt="Preview"
+                                                        className="h-full w-full object-cover"
+                                                        draggable={false}
+                                                    />
+                                                </div>
+                                            </div>
 
-                                        <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
                                             <div className="space-y-2">
                                                 <Input
                                                     type="file"
                                                     accept="image/*"
                                                     onChange={handleImageUpload}
                                                 />
+                                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                    Square image works best —
+                                                    shown on the public event
+                                                    card.
+                                                </p>
                                                 {(form.errors as any).image ? (
                                                     <div className="text-xs text-red-600">
                                                         {
@@ -2356,21 +2386,15 @@ export default function EventManagement(props: PageProps) {
                                                     </div>
                                                 ) : null}
                                             </div>
-
-                                            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                                                <div className="aspect-square bg-slate-100 dark:bg-slate-900">
-                                                    <img
-                                                        src={
-                                                            imagePreview ??
-                                                            DEFAULT_EVENT_IMAGE
-                                                        }
-                                                        alt="Preview"
-                                                        className="h-full w-full object-cover"
-                                                        draggable={false}
-                                                    />
-                                                </div>
-                                            </div>
                                         </div>
+                                    </div>
+
+                                    {/* SECTION: Attachments & downloads */}
+                                    <div className="sm:col-span-2">
+                                        <div className="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
+                                            Attachments &amp; downloads
+                                        </div>
+                                        <div className="mt-2 h-px w-full bg-slate-200 dark:bg-slate-800" />
                                     </div>
 
                                     {/* PDF (upload only) */}
@@ -2379,7 +2403,7 @@ export default function EventManagement(props: PageProps) {
                                             PDF (View more)
                                         </div>
 
-                                        <div className="grid gap-3 sm:grid-cols-[1fr_260px]">
+                                        <div className="grid gap-3 sm:grid-cols-[1fr_260px] sm:items-start">
                                             <div className="space-y-2">
                                                 <Input
                                                     type="file"
@@ -3369,14 +3393,11 @@ export default function EventManagement(props: PageProps) {
             >
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>
-                            Remove this venue?
-                        </AlertDialogTitle>
+                        <AlertDialogTitle>Remove this venue?</AlertDialogTitle>
                         <AlertDialogDescription>
                             This will permanently remove{' '}
                             <span className="font-semibold text-slate-900 dark:text-slate-100">
-                                {venueDeleteTarget?.venue?.name ??
-                                    'this venue'}
+                                {venueDeleteTarget?.venue?.name ?? 'this venue'}
                             </span>{' '}
                             from{' '}
                             <span className="font-semibold text-slate-900 dark:text-slate-100">

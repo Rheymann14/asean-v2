@@ -69,7 +69,6 @@ type ParticipantInfo = {
     display_id?: string | null;
 
     // ✅ from DB columns
-    qr_payload?: string | null;
     qr_token?: string | null;
     profile_image_url?: string | null;
     country_code?: string | null;
@@ -1353,8 +1352,10 @@ export default function Scanner(props: PageProps) {
         context.drawImage(video, 0, 0, width, height);
 
         const imageData = context.getImageData(0, 0, width, height);
+        // our QRs are always dark-on-light (screen/print), so skip the
+        // inverted pass — roughly halves decode time per frame
         const code = jsQR(imageData.data, width, height, {
-            inversionAttempts: 'attemptBoth',
+            inversionAttempts: 'dontInvert',
         });
 
         return code?.data?.trim() ?? '';
@@ -1659,7 +1660,7 @@ export default function Scanner(props: PageProps) {
 
     // ✅ Inline result panel (shown beside the scanner — replaces the modal)
     const resultContent = (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="@container rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100">
                     {result ? (
@@ -1718,23 +1719,27 @@ export default function Scanner(props: PageProps) {
                     </div>
                 </div>
             ) : (
-                <>
+                // ✅ adaptive: ID card + status side-by-side when the panel is
+                // wide (container query), stacked when narrow — avoids the big
+                // empty gutters around the centered card on TV/presentation.
+                // zoom scales the whole block (card, fonts, QR, photo) up on
+                // wide panels so it stays legible from a distance.
+                <div className="mt-4 grid gap-4 @4xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)] @4xl:items-start @5xl:[zoom:1.15] @7xl:[zoom:1.3]">
                     {/* ✅ ID card FIRST */}
                     {cardParticipant ? (
-                        <div className="mt-4">
-                            <ScannerIdCardPreview
-                                participant={cardParticipant}
-                                flagSrc={flagSrc}
-                                orientation="landscape"
-                            />
-                        </div>
+                        <ScannerIdCardPreview
+                            participant={cardParticipant}
+                            flagSrc={flagSrc}
+                            orientation="landscape"
+                        />
                     ) : null}
 
-                    {/* ✅ Verified/Error card + details BELOW */}
+                    {/* ✅ Verified/Error card + details beside/below */}
                     {result ? (
                         <div
                             className={cn(
-                                'mt-4 rounded-3xl border p-4',
+                                'rounded-3xl border p-4',
+                                !cardParticipant && '@4xl:col-span-2',
                                 result.ok
                                     ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-950/20'
                                     : 'border-red-200 bg-red-50/60 dark:border-red-900/40 dark:bg-red-950/20',
@@ -1884,14 +1889,16 @@ export default function Scanner(props: PageProps) {
                             ) : null}
                         </div>
                     ) : null}
-                </>
+                </div>
             )}
         </div>
     );
 
     // ✅ recent scans list (session-only, newest first)
+    // flex-1 lets it stretch to fill the leftover column height so the
+    // panel bottom doesn't end in floating white space
     const recentList = (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="flex flex-1 flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
                     <Clock className="h-4 w-4 text-slate-400" />
@@ -1909,7 +1916,9 @@ export default function Scanner(props: PageProps) {
             </div>
 
             {recentScans.length === 0 ? (
-                <div className="mt-3 text-xs text-slate-400">No scans yet.</div>
+                <div className="grid flex-1 place-items-center py-8 text-xs text-slate-400">
+                    No scans yet.
+                </div>
             ) : (
                 <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
                     {recentScans.map((s) => (

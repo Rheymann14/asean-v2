@@ -189,7 +189,7 @@ class Asemme10RegistrationController extends Controller
                     'name' => $user->name,
                     'email' => $this->blankToNull($attendee['email'] ?? null),
                     'display_id' => $user->display_id,
-                    'qr_payload' => $user->qr_payload,
+                    'qr_scan_value' => $user->qr_scan_value,
                     'role' => $attendee['role'],
                     'country_code' => $user->country?->code,
                     'country_name' => $user->country?->name,

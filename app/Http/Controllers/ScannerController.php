@@ -65,7 +65,9 @@ class ScannerController extends Controller
         if (! $participant) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Invalid QR code or participant ID.',
+                'message' => $this->looksLikeAseanCode($validated['code'])
+                    ? 'Participant not found for this QR code.'
+                    : 'This is not a valid ASEAN QR code. Please scan a participant\'s ASEAN ID.',
             ]);
         }
 
@@ -132,7 +134,6 @@ class ScannerController extends Controller
                 'full_name' => $participant->name,
                 'profile_image_url' => $profileImageUrl,
                 'display_id' => $participant->display_id,
-                'qr_payload' => $participant->qr_payload,
                 'qr_token' => $participant->qr_token,
                 'email' => $participant->email,
                 'country' => $participant->country?->name,
@@ -160,26 +161,64 @@ class ScannerController extends Controller
 
     private function resolveParticipant(string $code): ?User
     {
-        $participant = User::query()
-            ->where('display_id', $code)
-            ->first();
+        $code = trim($code);
 
+        if ($code === '') {
+            return null;
+        }
+
+        // Low-noise QR: bare qr_token (UUID)
+        $participant = User::query()->where('qr_token', $code)->first();
         if ($participant) {
             return $participant;
         }
 
-        try {
-            $token = Crypt::decryptString($code);
-            $participant = User::query()
-                ->where('qr_token', $token)
-                ->first();
-        } catch (DecryptException) {
-            $participant = User::query()
-                ->where('qr_token', $code)
-                ->first();
+        // Manual entry: human-readable Participant ID
+        $participant = User::query()->where('display_id', $code)->first();
+        if ($participant) {
+            return $participant;
         }
 
-        return $participant;
+        // Previous-event QR: encrypted qr_payload — match the stored ciphertext
+        // directly first (works even if APP_KEY changed)...
+        $participant = User::query()->where('qr_payload', $code)->first();
+        if ($participant) {
+            return $participant;
+        }
+
+        // ...otherwise decrypt it back to the qr_token.
+        try {
+            $token = Crypt::decryptString($code);
+
+            return User::query()->where('qr_token', $token)->first();
+        } catch (DecryptException) {
+            return null;
+        }
+    }
+
+    /**
+     * Whether a scanned code is plausibly one of ours (so we can distinguish a
+     * genuine-but-unknown ASEAN code from a foreign/random QR when showing the
+     * rejection message).
+     */
+    private function looksLikeAseanCode(string $code): bool
+    {
+        $code = trim($code);
+
+        // qr_token shape (UUID) or the display_id shape (ASEAN-XXXX-XXXX)
+        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $code) === 1
+            || preg_match('/^ASEAN-[A-Z0-9]{4}-[A-Z0-9]{4}$/i', $code) === 1) {
+            return true;
+        }
+
+        // encrypted qr_payload that we can decrypt is also one of ours
+        try {
+            Crypt::decryptString($code);
+
+            return true;
+        } catch (DecryptException) {
+            return false;
+        }
     }
 
     private function resolvePhase(Programme $programme, Carbon $now): string

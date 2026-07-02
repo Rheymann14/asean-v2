@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Programme;
 use App\Models\ParticipantAttendance;
 use App\Models\ParticipantTableAssignment;
+use App\Models\Programme;
 use App\Models\TransportVehicle;
 use App\Models\User;
 use App\Models\UserType;
@@ -178,7 +178,7 @@ class VehicleAssignmentController extends Controller
                 return [
                     'id' => $participant->id,
                     'display_id' => $participant->display_id,
-                    'qr_payload' => $participant->qr_payload,
+                    'qr_scan_value' => $participant->qr_scan_value,
                     'profile_photo_url' => $participant->profile_photo_url,
                     'full_name' => $participant->name,
                     'email' => $participant->email,
@@ -355,7 +355,7 @@ class VehicleAssignmentController extends Controller
                 return [
                     'id' => $participant->id,
                     'display_id' => $participant->display_id,
-                    'qr_payload' => $participant->qr_payload,
+                    'qr_scan_value' => $participant->qr_scan_value,
                     'profile_photo_url' => $participant->profile_photo_url,
                     'full_name' => $participant->name,
                     'email' => $participant->email,
@@ -423,7 +423,6 @@ class VehicleAssignmentController extends Controller
         ]);
     }
 
-
     public function updatePresence(Request $request, VehicleAssignment $vehicleAssignment)
     {
         $user = $request->user();
@@ -446,7 +445,6 @@ class VehicleAssignmentController extends Controller
 
         return back();
     }
-
 
     public function sendPickupNotification(Request $request)
     {
@@ -491,7 +489,6 @@ class VehicleAssignmentController extends Controller
 
         return back();
     }
-
 
     public function removePickupNotification(Request $request)
     {

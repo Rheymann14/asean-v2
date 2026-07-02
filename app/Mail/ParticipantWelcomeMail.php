@@ -61,11 +61,11 @@ class ParticipantWelcomeMail extends Mailable
 
         return [
             'appUrl' => $appUrl,
-            'bannerUrl' => $appUrl . '/img/asean_banner_logo.png',
-            'logoUrl' => $appUrl . '/img/asean_logo.png',
+            'bannerUrl' => $appUrl.'/img/asean_banner_logo.png',
+            'logoUrl' => $appUrl.'/img/asean_logo.png',
             'bannerPath' => is_file($bannerPath) ? $bannerPath : null,
             'logoPath' => is_file($logoPath) ? $logoPath : null,
-            'bagongPilipinasUrl' => $appUrl . '/img/bagong_pilipinas.png',
+            'bagongPilipinasUrl' => $appUrl.'/img/bagong_pilipinas.png',
             'bagongPilipinasPath' => is_file($bagongPilipinasPath) ? $bagongPilipinasPath : null,
             'events' => $events,
             'primaryEventTitle' => $events->first()['title'] ?? 'ASEAN Philippines 2026 event',
@@ -76,7 +76,6 @@ class ParticipantWelcomeMail extends Mailable
         ];
     }
 
-
     public function attachments(): array
     {
         return [];
@@ -84,7 +83,7 @@ class ParticipantWelcomeMail extends Mailable
 
     private function qrUrl(): string
     {
-        $payload = urlencode((string) $this->user->qr_payload);
+        $payload = urlencode((string) $this->user->qr_scan_value);
 
         return "https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data={$payload}";
     }

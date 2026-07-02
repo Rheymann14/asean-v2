@@ -16,7 +16,7 @@ class ParticipantDashboardController extends Controller
         return Inertia::render('participant-dashboard', [
             'participant' => [
                 'display_id' => $user->display_id,
-                'qr_payload' => $user->qr_payload,
+                'qr_scan_value' => $user->qr_scan_value,
                 'name' => $user->name,
                 'email' => $user->email,
                 'profile_photo_url' => $user->profile_photo_path ? asset($user->profile_photo_path) : null,
@@ -91,11 +91,11 @@ class ParticipantDashboardController extends Controller
         $extension = $file->getClientOriginalExtension() ?: 'jpg';
         $filename = sprintf('%s-%s.%s', $user->id, Str::uuid(), $extension);
         $directory = public_path('profile-image');
-        if (!File::exists($directory)) {
+        if (! File::exists($directory)) {
             File::makeDirectory($directory, 0755, true);
         }
         $file->move($directory, $filename);
-        $user->profile_photo_path = 'profile-image/' . $filename;
+        $user->profile_photo_path = 'profile-image/'.$filename;
         $user->save();
 
         return back();
@@ -121,7 +121,7 @@ class ParticipantDashboardController extends Controller
             'avail_transport_from_makati_to_peninsula' => ['nullable', 'boolean'],
         ]);
 
-        if (!$validated['attend_welcome_dinner']) {
+        if (! $validated['attend_welcome_dinner']) {
             $validated['avail_transport_from_makati_to_peninsula'] = false;
         }
 
